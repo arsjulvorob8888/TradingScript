@@ -189,14 +189,24 @@ async function desk(token, accountId) {
     return result;
   }
   const portfolio = await tbank(cleaned, link.host, link.sandbox ? "SandboxService" : "OperationsService", link.sandbox ? "GetSandboxPortfolio" : "GetPortfolio", { accountId: account.id });
-  const positions = (portfolio.positions || []).map((item) => ({
-    name: item.name || item.ticker || "Позиция",
-    ticker: item.ticker || "",
-    group: groupOf(item.ticker || "", item.instrumentType || ""),
-    quantity: money(item.quantity),
-    price: money(item.currentPrice),
-    value: Math.abs(money(item.currentPrice) * money(item.quantity)),
-  })).filter((item) => item.value > 0 || item.quantity !== 0);
+  const positions = (portfolio.positions || []).map((item) => {
+    const quantity = money(item.quantity);
+    const price = money(item.currentPrice);
+    const value = Math.abs(price * quantity);
+    const pnl = money(item.expectedYield);
+    const base = value - pnl;
+    return {
+      name: item.name || item.ticker || "Позиция",
+      ticker: item.ticker || "",
+      group: groupOf(item.ticker || "", item.instrumentType || ""),
+      quantity,
+      price,
+      average: money(item.averagePositionPrice),
+      value,
+      pnl,
+      pnlPercent: base > 0 ? (pnl / base) * 100 : 0,
+    };
+  }).filter((item) => item.value > 0 || item.quantity !== 0);
   const cashOnAccount = money(portfolio.totalAmountCurrencies);
   const cash = cashOnAccount || positions.filter((item) => item.group === "Деньги").reduce((sum, item) => sum + item.value, 0);
   const traded = positions.filter((item) => item.group !== "Деньги");
@@ -206,9 +216,12 @@ async function desk(token, accountId) {
     id: account.id,
     name: account.name || (link.sandbox ? "Песочница" : "Счёт"),
     type: account.type || "",
-    total: money(portfolio.totalAmountPortfolio) || cash + securities + futures || positions.reduce((sum, item) => sum + item.value, 0),
+    total: money(portfolio.totalAmountPortfolio) || cash + securities + futures || traded.reduce((sum, item) => sum + item.value, 0),
     cash,
     securities,
+    shares: money(portfolio.totalAmountShares),
+    bonds: money(portfolio.totalAmountBonds),
+    etf: money(portfolio.totalAmountEtf),
     futures,
     yield: money(portfolio.expectedYield),
     positions: traded,

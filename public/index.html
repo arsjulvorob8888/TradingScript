@@ -17,7 +17,12 @@
     body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 "Segoe UI", sans-serif; }
     main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
     h1 { margin: 0; font-size: 26px; }
-    .balance { font-size: 28px; font-weight: 700; letter-spacing: -0.03em; }
+    .balance { font-size: 32px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; }
+    .yield { font-size: 14px; font-weight: 600; }
+    .classes { display: flex; flex-wrap: wrap; gap: 8px; }
+    .classes div { background: var(--bg); border-radius: 12px; padding: 8px 10px; min-width: 108px; }
+    .prow { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+    .prow .right { text-align: right; }
     .muted { color: var(--muted); }
     .kicker { font-size: 12px; font-weight: 700; letter-spacing: .04em; }
     header, form, .stats, .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; justify-content: space-between; }
@@ -79,6 +84,7 @@
       <div class="muted kicker">ИНВЕСТИЦИИ</div>
       <h1 id="title">Портфель</h1>
       <div class="balance" id="balanceTotal">—</div>
+      <div id="balanceYield" class="yield">—</div>
       <div class="muted" id="balanceDetail">Баланс появится после обновления счёта</div>
       <select id="accountPick" hidden></select>
       <div class="muted" id="subtitle">Стратегия остановлена</div>
@@ -94,12 +100,6 @@
     <input class="token" id="token" type="password" placeholder="Токен Т-Инвестиций" autocomplete="off" />
     <button type="submit" id="refresh">Обновить с биржи</button>
   </form>
-  <div class="stats">
-    <div class="card stat"><div class="muted">Свободные деньги</div><strong id="balanceCash">—</strong></div>
-    <div class="card stat"><div class="muted">В бумагах</div><strong id="balanceSecurities">—</strong></div>
-    <div class="card stat"><div class="muted">Фьючерсы</div><strong id="balanceFutures">—</strong></div>
-    <div class="card stat"><div class="muted">Доход позиции</div><strong id="balanceYield">—</strong></div>
-  </div>
   <div class="muted" id="note"></div>
   <section class="control">
     <div class="panel">
@@ -135,11 +135,8 @@
     <div class="sleeves" id="sleeves"></div>
   </section>
   <section class="panel">
-    <div class="top"><h2>Факт на счёте</h2><span class="muted" id="factline">Позиции ещё не загружены</span></div>
-    <div class="scroll"><table>
-      <thead><tr><th>Инструмент</th><th>Группа</th><th>Количество</th><th>Цена</th><th>Стоимость</th></tr></thead>
-      <tbody id="homePositions"></tbody>
-    </table></div>
+    <div class="classes" id="classes"></div>
+    <div id="homePositions"></div>
   </section>
   </section>
   <section class="panel" data-page="/bonds">
@@ -473,10 +470,16 @@ function draw() {
   const account = accountState?.account;
   const moneyText = (value) => Math.round(Number(value) || 0).toLocaleString("ru-RU") + " ₽";
   document.querySelector("#balanceTotal").textContent = account ? moneyText(account.total) : "—";
-  document.querySelector("#balanceCash").textContent = account ? moneyText(account.cash) : "—";
-  document.querySelector("#balanceSecurities").textContent = account ? moneyText(account.securities) : "—";
-  document.querySelector("#balanceFutures").textContent = account ? moneyText(account.futures) : "—";
-  document.querySelector("#balanceYield").textContent = account ? (account.yield > 0 ? "+" : "") + moneyText(account.yield) : "—";
+  const yieldNode = document.querySelector("#balanceYield");
+  if (account) {
+    const base = account.total - account.yield;
+    const pct = base > 0 ? (account.yield / base) * 100 : 0;
+    yieldNode.textContent = `${account.yield > 0 ? "+" : ""}${moneyText(account.yield)} (${pct.toFixed(2).replace(".", ",")}%) за всё время`;
+    yieldNode.className = "yield " + (account.yield < 0 ? "down" : "up");
+  } else {
+    yieldNode.textContent = "—";
+    yieldNode.className = "yield";
+  }
   document.querySelector("#balanceDetail").textContent = account ? `${account.name}${accountState.sandbox ? " · песочница" : " · брокерский счёт"}` : "Счёт не загружен";
   const picker = document.querySelector("#accountPick");
   const accounts = accountState?.accounts || [];
@@ -486,10 +489,17 @@ function draw() {
     picker.value = account?.id || accounts[0].id;
   }
   const positions = account?.positions || [];
-  const total = positions.reduce((sum, item) => sum + item.value, 0) || accountState?.account?.total || 0;
-  document.querySelector("#factline").textContent = positions.length ? `${positions.length} позиций · ${Math.round(total).toLocaleString("ru-RU")} ₽` : "На счёте нет позиций";
+  const total = positions.reduce((sum, item) => sum + item.value, 0) || account?.total || 0;
+  const classes = account ? [["Акции", account.shares], ["Облигации", account.bonds], ["Фонды", account.etf], ["Валюта", account.cash], ["Фьючерсы", account.futures]] : [];
+  document.querySelector("#classes").innerHTML = classes.map(([name, value]) => `<div><div class="muted">${name}</div><strong>${moneyText(value)}</strong></div>`).join("");
+  const sign = (value) => `${value > 0 ? "+" : ""}${moneyText(value)}`;
+  const qtyText = (value) => {
+    const abs = Math.abs(value);
+    const text = abs >= 100 ? Math.round(abs).toLocaleString("ru-RU") : abs.toFixed(2).replace(/\.00$/, "");
+    return (value < 0 ? "шорт " : "") + text + " шт";
+  };
+  document.querySelector("#homePositions").innerHTML = (positions.map((item) => `<div class="prow"><div><strong>${esc(item.name)}</strong><div class="muted">${esc(item.ticker)} · ${qtyText(item.quantity)}${item.average ? " · средняя " + item.average.toFixed(2) : ""}</div></div><div class="right"><strong>${moneyText(item.value)}</strong><div class="${item.pnl < 0 ? "down" : "up"}">${sign(item.pnl || 0)} · ${(item.pnlPercent || 0).toFixed(2).replace(".", ",")}%</div></div></div>`).join("") + (account ? `<div class="prow"><div><strong>Рубли</strong><div class="muted">свободно на счёте</div></div><div class="right"><strong>${moneyText(account.cash)}</strong></div></div>` : "")) || `<div class="muted">Счёт пуст</div>`;
   const rowOf = (item, share) => `<tr><td><strong>${esc(item.name)}</strong><div class="muted">${esc(item.ticker || "")}</div></td><td>${esc(item.group)}</td><td>${item.quantity.toFixed(2)}</td><td>${item.price ? item.price.toFixed(2) : "—"}</td><td>${Math.round(item.value).toLocaleString("ru-RU")} ₽</td>${share}</tr>`;
-  document.querySelector("#homePositions").innerHTML = positions.length ? positions.map((item) => rowOf(item, "")).join("") : `<tr><td colspan="5" class="muted">Позиций нет. Запустите шаг стратегии.</td></tr>`;
   document.querySelector("#strategyPositions").innerHTML = positions.length ? positions.map((item) => rowOf(item, `<td>${total ? (item.value / total * 100).toFixed(1) : "0"}%</td>`)).join("") : `<tr><td colspan="6" class="muted">Позиций нет.</td></tr>`;
   const orders = accountState?.orders || [];
   document.querySelector("#liveOrders").innerHTML = orders.length ? orders.map((item) => `<tr><td>${esc(item.ticker)}</td><td>${esc(item.direction)}</td><td>${item.lots}</td><td>${item.done}</td><td>${esc(String(item.status).replace("EXECUTION_REPORT_STATUS_", ""))}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">Открытых заявок нет</td></tr>`;
