@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Инвестиции</title>
+  <style>
+    :root { color-scheme: light; --bg:#f3f4f6; --card:#fff; --ink:#1c1c1c; --muted:#8b919a; --line:#e6e8ec; --yellow:#ffdd2d; --yellow-2:#f0c400; --blue:#3b78f0; --down:#d0121a; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 "Segoe UI", sans-serif; }
+    main { max-width: 960px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
+    header, form, .note, .rings, aside, table { }
+    h1 { margin: 0; font-size: 26px; }
+    .muted { color: var(--muted); }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; justify-content: space-between; }
+    .stats, form { display: flex; flex-wrap: wrap; gap: 8px; }
+    .card, input, button { background: var(--card); border: 0; border-radius: 12px; }
+    input, button { height: 44px; padding: 0 14px; font: inherit; }
+    input { flex: 1; min-width: 180px; }
+    button { font-weight: 700; cursor: pointer; }
+    button:hover { background: var(--line); }
+    button.primary { background: var(--yellow); }
+    button.primary:hover { background: var(--yellow-2); }
+    .stat { padding: 8px 12px; }
+    .down { color: var(--down); font-weight: 700; }
+    .layout { display: grid; grid-template-columns: 1.4fr .8fr; gap: 12px; }
+    .rings { display: flex; gap: 12px; }
+    .ring, .meter, .note, table { background: var(--card); border-radius: 16px; }
+    .ring { flex: 1; display: flex; gap: 8px; align-items: center; padding: 12px; }
+    svg { width: 112px; height: 112px; flex: 0 0 auto; }
+    .meter { padding: 12px; }
+    .bar { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; margin-top: 8px; }
+    .bar span { display: block; height: 100%; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px 14px; }
+    th { color: var(--muted); font-weight: 500; }
+    tr + tr td { border-top: 1px solid var(--line); }
+    .note { padding: 10px 14px; }
+    @media (max-width: 800px) { .layout, .rings { display: block; } .ring + .ring, .meter { margin-top: 8px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header class="row">
+    <div>
+      <div class="muted">ИНВЕСТИЦИИ</div>
+      <h1 id="title">Портфель</h1>
+      <div class="muted" id="account">Счёт не подключён</div>
+    </div>
+    <div class="stats">
+      <div class="card stat"><div class="muted">Прогноз</div><strong id="forecast">—</strong></div>
+      <div class="card stat"><div class="muted">Ключевая</div><strong id="key">14%</strong></div>
+      <div class="card stat"><div class="muted">Разрыв</div><strong id="gap">—</strong></div>
+    </div>
+  </header>
+  <form id="form">
+    <input id="token" type="password" placeholder="Токен Т-Инвестиций" autocomplete="off" />
+    <button type="submit">Подключить счёт</button>
+    <button class="primary" id="launch" type="button">Запустить стратегию</button>
+  </form>
+  <div class="note" id="note"></div>
+  <section class="layout">
+    <div class="rings">
+      <div class="ring"><svg id="planRing"></svg><div><strong>План</strong><div id="planLegend"></div></div></div>
+      <div class="ring"><svg id="factRing"></svg><div><strong>Факт</strong><div id="factLegend" class="muted">На счёте нет позиций</div></div></div>
+    </div>
+    <aside id="meters"></aside>
+  </section>
+  <table>
+    <thead><tr><th>Инструмент</th><th>Группа</th><th>План</th><th>Факт</th><th>Доходность</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</main>
+<script>
+const colors = { Пары: "#ffdd2d", Фонды: "#3b78f0", Облигации: "#2a2a2a" };
+const tokenInput = document.querySelector("#token");
+tokenInput.value = localStorage.getItem("carry-token") || "";
+
+function ring(id, parts, empty) {
+  const svg = document.querySelector(id);
+  const data = empty ? [{ name: "Пусто", value: 1, color: "#e6e8ec" }] : parts.filter((item) => item.value > 0);
+  const total = data.reduce((sum, item) => sum + item.value, 0) || 1;
+  let angle = -Math.PI / 2;
+  const arcs = data.map((item) => {
+    const slice = (item.value / total) * Math.PI * 2;
+    const start = angle;
+    angle += slice;
+    const large = slice > Math.PI ? 1 : 0;
+    const a = [Math.cos(start), Math.sin(start)];
+    const b = [Math.cos(angle - 0.001), Math.sin(angle - 0.001)];
+    return `<path d="M ${50 + a[0]*32} ${50 + a[1]*32} A 32 32 0 ${large} 1 ${50 + b[0]*32} ${50 + b[1]*32}" stroke="${item.color || colors[item.name]}" stroke-width="16" fill="none"/>`;
+  }).join("");
+  svg.innerHTML = `<circle cx="50" cy="50" r="32" stroke="#e6e8ec" stroke-width="16" fill="none"/>${arcs}`;
+}
+
+function legend(parts) {
+  return parts.map((item) => `<div>${item.name} <strong>${item.value}%</strong></div>`).join("");
+}
+
+function draw(desk) {
+  document.querySelector("#forecast").textContent = desk.forecast.toFixed(1) + "%";
+  document.querySelector("#key").textContent = desk.keyRate.toFixed(0) + "%";
+  const gap = document.querySelector("#gap");
+  gap.textContent = (desk.gap > 0 ? "+" : "") + desk.gap.toFixed(1) + " п.п.";
+  gap.className = desk.gap < 0 ? "down" : "";
+  document.querySelector("#title").textContent = desk.account ? desk.account.name : "Портфель";
+  document.querySelector("#account").textContent = desk.account ? new Intl.NumberFormat("ru-RU").format(desk.account.total) + " ₽" : "Счёт не подключён";
+  const groups = ["Пары", "Фонды", "Облигации"].map((name) => ({ name, value: desk.plan.filter((row) => row.group === name).reduce((sum, row) => sum + row.share, 0) }));
+  ring("#planRing", groups);
+  document.querySelector("#planLegend").innerHTML = legend(groups);
+  const positions = desk.account?.positions || [];
+  const total = positions.reduce((sum, item) => sum + item.value, 0);
+  const fact = total ? positions.map((item) => ({ name: item.name, group: item.group, value: Math.round(item.value / total * 100) })) : [];
+  const factGroups = ["Пары", "Фонды", "Облигации"].map((name) => ({ name, value: fact.filter((row) => row.group === name).reduce((sum, row) => sum + row.value, 0) })).filter((item) => item.value);
+  ring("#factRing", factGroups, !factGroups.length);
+  document.querySelector("#factLegend").innerHTML = factGroups.length ? legend(factGroups) : "На счёте нет позиций";
+  document.querySelector("#meters").innerHTML = groups.map((item) => {
+    const hint = item.name === "Пары" ? `${desk.yields.usd.toFixed(1)}% и ${desk.yields.cny.toFixed(1)}%` : item.name === "Фонды" ? `LQDT ${desk.yields.lqdt.toFixed(1)}% · TMON ${desk.yields.tmon.toFixed(1)}%` : `ОФЗ ${desk.yields.ofz.toFixed(1)}%`;
+    return `<div class="meter"><div class="row"><strong>${item.name}</strong><strong>${item.value}%</strong></div><div class="bar"><span style="width:${item.value}%;background:${colors[item.name]}"></span></div><div class="muted">${hint}</div></div>`;
+  }).join("");
+  document.querySelector("#rows").innerHTML = desk.plan.map((row) => {
+    const actual = fact.find((item) => item.name === row.name);
+    return `<tr><td>${row.name}</td><td class="muted">${row.group}</td><td>${row.share}%</td><td>${actual ? actual.value + "%" : "—"}</td><td>${row.yield.toFixed(1)}%</td></tr>`;
+  }).join("");
+}
+
+async function load(launch) {
+  const note = document.querySelector("#note");
+  note.textContent = "Считаю…";
+  const response = await fetch("/api/desk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim() }) });
+  const desk = await response.json();
+  if (!response.ok || desk.error) {
+    note.textContent = desk.error || "Нет связи";
+    return;
+  }
+  draw(desk);
+  note.textContent = (launch ? "Состав пересчитан. Заявки не отправлены. " : "") + desk.note;
+}
+
+document.querySelector("#form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  localStorage.setItem("carry-token", tokenInput.value.trim());
+  load(false);
+});
+document.querySelector("#launch").addEventListener("click", () => load(true));
+load(false);
+</script>
+</body>
+</html>

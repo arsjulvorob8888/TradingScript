@@ -1,0 +1,9 @@
+# Requirements for Currency Bond + Perpetual Futures Strategy Desktop App
+# t-tech-investments is installed separately from T-Bank private index
+PyQt6>=6.5.0
+matplotlib>=3.7.0
+pandas>=2.0.0
+numpy>=1.24.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+pyqtgraph>=0.13.0
