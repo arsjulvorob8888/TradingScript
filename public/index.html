@@ -49,7 +49,13 @@
     tr + tr td { border-top: 1px solid var(--line); }
     .scroll { overflow-x: auto; }
     .token { flex: 1; }
-    @media (max-width: 800px) { .split, .sleeves { display: block; } .sleeve + .sleeve { margin-top: 8px; } }
+    #status { margin: 0; font-size: 22px; }
+    #toast.show { opacity: 1; }
+    .control { display: grid; grid-template-columns: 1.4fr .8fr; gap: 12px; }
+    .check { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+    .check input { width: auto; min-width: 0; height: auto; }
+    #log div + div { margin-top: 6px; }
+    @media (max-width: 800px) { .control { display: block; } .control .panel + .panel { margin-top: 8px; } }
   </style>
 </head>
 <body>
@@ -64,7 +70,7 @@
     <div>
       <div class="muted kicker">ИНВЕСТИЦИИ</div>
       <h1 id="title">Портфель</h1>
-      <div class="muted">13,2% была короткая ОФЗ 26232. Длинные ОФЗ сейчас дают около 16,5% к погашению.</div>
+      <div class="muted" id="subtitle">Стратегия остановлена</div>
     </div>
     <div class="stats">
       <div class="card stat"><div class="muted">Прогноз стратегии</div><strong id="forecast">—</strong></div>
@@ -77,6 +83,24 @@
     <button type="submit" id="refresh">Обновить с биржи</button>
   </form>
   <div class="muted" id="note"></div>
+  <section class="control">
+    <div class="panel">
+      <div class="top">
+        <div>
+          <div class="muted">Статус</div>
+          <h2 id="status">Остановлена</h2>
+        </div>
+        <button id="toggle" class="add" type="button">Запустить стратегию</button>
+      </div>
+      <label class="check"><input id="reinvest" type="checkbox" checked> Реинвестировать купоны и фандинг в лучшую корзину</label>
+      <label class="check"><input id="auto" type="checkbox"> Разрешить заявки без отдельного подтверждения</label>
+      <div class="muted" id="next"></div>
+    </div>
+    <div class="panel">
+      <div class="muted">Журнал</div>
+      <div id="log"></div>
+    </div>
+  </section>
   <section class="split">
     <div class="panel donut"><svg id="ring"></svg><div id="legend"></div></div>
     <div class="sleeves" id="sleeves"></div>
@@ -123,6 +147,7 @@
     </header>
     <div class="sleeves" id="strategy"></div>
   </section>
+<div id="toast"></div>
 </main>
 <script>
 const SANDBOX = "t.FYCrHI6u8UGEs6RhUrpV0ixAVRFCJg0IowCXxQ7uOQdNwgSsO5o42B9hhvN9UxtVkVZPj9FYgZOJVvAcWRN5OA";
@@ -131,6 +156,28 @@ const tokenInput = document.querySelector("#token");
 tokenInput.value = localStorage.getItem("carry-token") || SANDBOX;
 let board = null;
 let picks = JSON.parse(localStorage.getItem("carry-picks") || '{"rub":[],"usd":[],"cny":[]}');
+let active = localStorage.getItem("carry-active") === "1";
+let autoOrders = localStorage.getItem("carry-auto") === "1";
+let reinvest = localStorage.getItem("carry-reinvest") !== "0";
+let log = JSON.parse(localStorage.getItem("carry-log") || "[]");
+let toastTimer;
+
+function toast(text) {
+  const node = document.querySelector("#toast");
+  node.textContent = text;
+  node.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => node.classList.remove("show"), 2600);
+}
+function record(text) {
+  const time = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  log.unshift({ time, text });
+  log = log.slice(0, 6);
+  localStorage.setItem("carry-log", JSON.stringify(log));
+}
+function sleeveName(sleeve) {
+  return sleeve === "usd" ? "пару доллар" : sleeve === "cny" ? "пару юань" : "рублёвые";
+}
 let filter = "ОФЗ";
 let risky = false;
 let sortKey = "ytm";
@@ -190,8 +237,17 @@ function ring(parts) {
 }
 function save() { localStorage.setItem("carry-picks", JSON.stringify(picks)); }
 function choose(sleeve, secid) {
-  if (!picks[sleeve].includes(secid)) picks[sleeve].push(secid);
+  const bond = (board?.bonds || []).find((item) => item.secid === secid);
+  const name = bond ? bond.name : secid;
+  const where = sleeveName(sleeve);
+  if (picks[sleeve].includes(secid)) {
+    toast(name + " уже в корзине: " + where);
+    return;
+  }
+  picks[sleeve].push(secid);
   save();
+  record(name + " добавлена в " + where);
+  toast(name + " добавлена в " + where);
   draw();
 }
 function remove(sleeve, secid) {
@@ -210,6 +266,16 @@ function draw() {
     { name: "Облигации", value: Math.round(current.weights.rub * 100) },
   ] : [];
   document.querySelector("#forecast").textContent = current ? current.forecast.toFixed(1) + "%" : "—";
+  document.querySelector("#status").textContent = active ? "Работает" : "Остановлена";
+  document.querySelector("#subtitle").textContent = active ? "Стратегия запущена и следит за доходностью корзин" : "Стратегия остановлена. Запуск — жёлтой кнопкой";
+  const toggle = document.querySelector("#toggle");
+  toggle.textContent = active ? "Остановить" : "Запустить стратегию";
+  toggle.classList.toggle("add", !active);
+  const best = !current ? "рублёвые облигации" : current.usd >= current.cny && current.usd >= current.rubYtm ? "пару доллар" : current.cny >= current.rubYtm ? "пару юань" : "рублёвые облигации";
+  document.querySelector("#next").textContent = active
+    ? (reinvest ? "Купоны и фандинг направляются в " + best + ". " : "Реинвестирование выключено. ") + (autoOrders ? "Автозаявки отмечены, на биржу пока не отправляются." : "Новые заявки только с вашим подтверждением.")
+    : "Пока стратегия остановлена, бумаги только попадают в план.";
+  document.querySelector("#log").innerHTML = log.length ? log.map((item) => `<div><strong>${esc(item.time)}</strong> ${esc(item.text)}</div>`).join("") : "<div class='muted'>Пока пусто</div>";
   const gap = document.querySelector("#gap");
   if (current) {
     const delta = current.forecast - 14;
@@ -267,7 +333,7 @@ function draw() {
   document.querySelector("#rows").innerHTML = visible.map((bond) => {
     const action = bond.currency === "USD" ? "usd:В пару $" : bond.currency === "CNY" ? "cny:В пару ¥" : "rub:В рублёвые";
     const [sleeveName, label] = action.split(":");
-    return `<tr><td><strong>${esc(bond.name)}</strong><div class="muted">${esc(bond.kind)}${bond.risk === "повышенный" ? " · повышенный риск" : ""}</div></td><td><strong>${bond.ytm.toFixed(2)}%</strong>${bond.offerYield ? `<div class="muted">к оферте ${bond.offerYield.toFixed(1)}%</div>` : ""}</td><td>${bond.coupon === null ? "плавающий" : bond.coupon.toFixed(2) + "%"}${bond.couponYield ? `<div class="muted">текущая ${bond.couponYield.toFixed(1)}%</div>` : ""}</td><td>${esc(bond.frequency)}<div class="muted">${esc(bond.nextCoupon || "")}</div></td><td>${esc(bond.maturity || "нет даты")}</td><td>${bond.durationDays ? (bond.durationDays / 365).toFixed(1) + " г." : "—"}</td><td>${bond.price?.toFixed(2) ?? "—"}</td><td>${bond.turnover ? (bond.turnover / 1e6).toFixed(1) + " млн" : "—"}</td><td><button class="add" data-add="${sleeveName}:${bond.secid}">${label}</button></td></tr>`;
+    return `<tr><td><strong>${esc(bond.name)}</strong><div class="muted">${esc(bond.kind)}${bond.risk === "повышенный" ? " · повышенный риск" : ""}</div></td><td><strong>${bond.ytm.toFixed(2)}%</strong>${bond.offerYield ? `<div class="muted">к оферте ${bond.offerYield.toFixed(1)}%</div>` : ""}</td><td>${bond.coupon === null ? "плавающий" : bond.coupon.toFixed(2) + "%"}${bond.couponYield ? `<div class="muted">текущая ${bond.couponYield.toFixed(1)}%</div>` : ""}</td><td>${esc(bond.frequency)}<div class="muted">${esc(bond.nextCoupon || "")}</div></td><td>${esc(bond.maturity || "нет даты")}</td><td>${bond.durationDays ? (bond.durationDays / 365).toFixed(1) + " г." : "—"}</td><td>${bond.price?.toFixed(2) ?? "—"}</td><td>${bond.turnover ? (bond.turnover / 1e6).toFixed(1) + " млн" : "—"}</td><td><button class="add" data-add="${sleeveName}:${bond.secid}">${picks[sleeveName].includes(bond.secid) ? "Добавлено" : label}</button></td></tr>`;
   }).join("");
 }
 document.body.addEventListener("click", (event) => {
@@ -318,6 +384,26 @@ async function refresh(force) {
     document.querySelector("#refresh").textContent = "Обновить с биржи";
   }
 }
+document.querySelector("#reinvest").checked = reinvest;
+document.querySelector("#auto").checked = autoOrders;
+document.querySelector("#toggle").addEventListener("click", () => {
+  active = !active;
+  localStorage.setItem("carry-active", active ? "1" : "0");
+  record(active ? "Стратегия запущена" : "Стратегия остановлена");
+  toast(active ? "Стратегия запущена" : "Стратегия остановлена");
+  draw();
+});
+document.querySelector("#reinvest").addEventListener("change", (event) => {
+  reinvest = event.target.checked;
+  localStorage.setItem("carry-reinvest", reinvest ? "1" : "0");
+  draw();
+});
+document.querySelector("#auto").addEventListener("change", (event) => {
+  autoOrders = event.target.checked;
+  localStorage.setItem("carry-auto", autoOrders ? "1" : "0");
+  record(autoOrders ? "Автозаявки разрешены" : "Автозаявки выключены");
+  draw();
+});
 document.querySelector("#form").addEventListener("submit", (event) => {
   event.preventDefault();
   localStorage.setItem("carry-token", tokenInput.value.trim());
