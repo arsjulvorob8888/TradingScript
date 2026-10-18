@@ -166,7 +166,7 @@ function groupOf(ticker, kind) {
   return "Облигации";
 }
 
-async function desk(token) {
+async function desk(token, accountId) {
   const quote = await market();
   const built = planFrom(quote.data);
   const result = {
@@ -182,7 +182,7 @@ async function desk(token) {
   const cleaned = String(token || "").trim().replace(/^bearer\s+/i, "").replace(/\s+/g, "");
   if (!cleaned) return result;
   const link = await contour(cleaned);
-  const account = link.accounts[0];
+  const account = link.accounts.find((item) => item.id === accountId) || link.accounts[0];
   if (!account) {
     result.note = "Счёт не найден.";
     return result;
@@ -196,11 +196,33 @@ async function desk(token) {
     price: money(item.currentPrice),
     value: Math.abs(money(item.currentPrice) * money(item.quantity)),
   })).filter((item) => item.value > 0 || item.quantity !== 0);
+  const cash = money(portfolio.totalAmountCurrencies);
+  const securities = money(portfolio.totalAmountShares) + money(portfolio.totalAmountBonds) + money(portfolio.totalAmountEtf);
+  const futures = money(portfolio.totalAmountFutures);
   result.account = {
+    id: account.id,
     name: account.name || (link.sandbox ? "Песочница" : "Счёт"),
-    total: money(portfolio.totalAmountPortfolio) || positions.reduce((sum, item) => sum + item.value, 0),
+    type: account.type || "",
+    total: money(portfolio.totalAmountPortfolio) || cash + securities + futures || positions.reduce((sum, item) => sum + item.value, 0),
+    cash,
+    securities,
+    futures,
+    yield: money(portfolio.expectedYield),
     positions,
   };
+  result.accounts = [];
+  for (const item of link.accounts) {
+    if (item.id === account.id) {
+      result.accounts.push({ id: item.id, name: result.account.name, total: result.account.total, cash: result.account.cash });
+      continue;
+    }
+    try {
+      const other = await tbank(cleaned, link.host, link.sandbox ? "SandboxService" : "OperationsService", link.sandbox ? "GetSandboxPortfolio" : "GetPortfolio", { accountId: item.id });
+      result.accounts.push({ id: item.id, name: item.name || "Счёт", total: money(other.totalAmountPortfolio), cash: money(other.totalAmountCurrencies) });
+    } catch {
+      result.accounts.push({ id: item.id, name: item.name || "Счёт", total: 0, cash: 0 });
+    }
+  }
   result.operations = await operations(cleaned, link, account.id);
   result.orders = await openOrders(cleaned, link, account.id);
   result.sandbox = link.sandbox;
@@ -258,14 +280,14 @@ function operationName(type) {
   return names[type] || String(type || "Операция").replace("OPERATION_TYPE_", "");
 }
 
-async function trade(token, auto, intents) {
+async function trade(token, auto, intents, accountId) {
   const plan = Array.isArray(intents) ? intents.slice(0, 8) : [];
   if (!auto) {
     return { attempts: plan.map((item) => ({ title: item.title, ticker: item.ticker, status: "не отправлена", detail: "нет разрешения на заявки" })) };
   }
   const cleaned = String(token || "").trim().replace(/^bearer\s+/i, "").replace(/\s+/g, "");
   const link = await contour(cleaned);
-  const account = link.accounts[0];
+  const account = link.accounts.find((item) => item.id === accountId) || link.accounts[0];
   if (!account) return { attempts: [], note: "Счёт не найден." };
   const portfolio = await tbank(cleaned, link.host, link.sandbox ? "SandboxService" : "OperationsService", link.sandbox ? "GetSandboxPortfolio" : "GetPortfolio", { accountId: account.id });
   const held = new Map((portfolio.positions || []).map((item) => [item.ticker, money(item.quantity)]));
@@ -330,7 +352,7 @@ createServer(async (req, res) => {
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
-      const payload = JSON.stringify(await trade(body.token, Boolean(body.auto), body.intents));
+      const payload = JSON.stringify(await trade(body.token, Boolean(body.auto), body.intents, body.accountId));
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       res.end(payload);
       return;
@@ -339,7 +361,7 @@ createServer(async (req, res) => {
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
-      const payload = JSON.stringify(await desk(body.token));
+      const payload = JSON.stringify(await desk(body.token, body.accountId));
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       res.end(payload);
       return;

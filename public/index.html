@@ -17,6 +17,7 @@
     body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 "Segoe UI", sans-serif; }
     main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
     h1 { margin: 0; font-size: 26px; }
+    .balance { font-size: 28px; font-weight: 700; letter-spacing: -0.03em; }
     .muted { color: var(--muted); }
     .kicker { font-size: 12px; font-weight: 700; letter-spacing: .04em; }
     header, form, .stats, .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; justify-content: space-between; }
@@ -74,6 +75,9 @@
     <div>
       <div class="muted kicker">ИНВЕСТИЦИИ</div>
       <h1 id="title">Портфель</h1>
+      <div class="balance" id="balanceTotal">—</div>
+      <div class="muted" id="balanceDetail">Баланс появится после обновления счёта</div>
+      <select id="accountPick" hidden></select>
       <div class="muted" id="subtitle">Стратегия остановлена</div>
     </div>
     <div class="stats">
@@ -87,6 +91,12 @@
     <input class="token" id="token" type="password" placeholder="Токен Т-Инвестиций" autocomplete="off" />
     <button type="submit" id="refresh">Обновить с биржи</button>
   </form>
+  <div class="stats">
+    <div class="card stat"><div class="muted">Свободные деньги</div><strong id="balanceCash">—</strong></div>
+    <div class="card stat"><div class="muted">В бумагах</div><strong id="balanceSecurities">—</strong></div>
+    <div class="card stat"><div class="muted">Фьючерсы</div><strong id="balanceFutures">—</strong></div>
+    <div class="card stat"><div class="muted">Доход позиции</div><strong id="balanceYield">—</strong></div>
+  </div>
   <div class="muted" id="note"></div>
   <section class="control">
     <div class="panel">
@@ -432,7 +442,22 @@ function draw() {
     const labelText = included ? "Исключить" : label;
     return `<tr><td><strong>${esc(bond.name)}</strong><div class="muted">${esc(bond.kind)}</div></td><td class="${bond.risk === "высокий" ? "down" : bond.risk === "низкий" ? "up" : ""}"><strong>${esc(bond.rating || "не указан")}</strong><div class="muted">${esc(bond.risk || "")}</div></td><td><strong>${bond.ytm.toFixed(2)}%</strong>${bond.offerYield ? `<div class="muted">к оферте ${bond.offerYield.toFixed(1)}%</div>` : ""}</td><td>${bond.coupon === null ? "плавающий" : bond.coupon.toFixed(2) + "%"}${bond.couponYield ? `<div class="muted">текущая ${bond.couponYield.toFixed(1)}%</div>` : ""}</td><td>${esc(bond.frequency)}<div class="muted">${esc(bond.nextCoupon || "")}</div></td><td>${esc(bond.maturity || "нет даты")}</td><td>${bond.durationDays ? (bond.durationDays / 365).toFixed(1) + " г." : "—"}</td><td>${bond.price?.toFixed(2) ?? "—"}</td><td>${bond.turnover ? (bond.turnover / 1e6).toFixed(1) + " млн" : "—"}</td><td><button class="${included ? "" : "add"}" data-add="${sleeveName}:${bond.secid}">${labelText}</button></td></tr>`;
   }).join("");
-  const positions = accountState?.account?.positions || [];
+  const account = accountState?.account;
+  const moneyText = (value) => Math.round(Number(value) || 0).toLocaleString("ru-RU") + " ₽";
+  document.querySelector("#balanceTotal").textContent = account ? moneyText(account.total) : "—";
+  document.querySelector("#balanceCash").textContent = account ? moneyText(account.cash) : "—";
+  document.querySelector("#balanceSecurities").textContent = account ? moneyText(account.securities) : "—";
+  document.querySelector("#balanceFutures").textContent = account ? moneyText(account.futures) : "—";
+  document.querySelector("#balanceYield").textContent = account ? (account.yield > 0 ? "+" : "") + moneyText(account.yield) : "—";
+  document.querySelector("#balanceDetail").textContent = account ? `${account.name}${accountState.sandbox ? " · песочница" : " · брокерский счёт"}` : "Счёт не загружен";
+  const picker = document.querySelector("#accountPick");
+  const accounts = accountState?.accounts || [];
+  picker.hidden = accounts.length < 2;
+  if (accounts.length > 1) {
+    picker.innerHTML = accounts.map((item) => `<option value="${esc(item.id)}">${esc(item.name)} · ${moneyText(item.total)}</option>`).join("");
+    picker.value = account?.id || accounts[0].id;
+  }
+  const positions = account?.positions || [];
   const total = positions.reduce((sum, item) => sum + item.value, 0) || accountState?.account?.total || 0;
   document.querySelector("#factline").textContent = positions.length ? `${positions.length} позиций · ${Math.round(total).toLocaleString("ru-RU")} ₽` : "На счёте нет позиций";
   const rowOf = (item, share) => `<tr><td><strong>${esc(item.name)}</strong><div class="muted">${esc(item.ticker || "")}</div></td><td>${esc(item.group)}</td><td>${item.quantity.toFixed(2)}</td><td>${item.price ? item.price.toFixed(2) : "—"}</td><td>${Math.round(item.value).toLocaleString("ru-RU")} ₽</td>${share}</tr>`;
@@ -509,7 +534,7 @@ async function step() {
   stepping = true;
   document.querySelectorAll("[data-step]").forEach((button) => { button.textContent = "Выставляю…"; });
   try {
-    const response = await fetch("/api/step", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim(), auto: autoOrders, intents: buildIntents() }) }).then((item) => item.json());
+    const response = await fetch("/api/step", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim(), auto: autoOrders, accountId: localStorage.getItem("carry-account") || "", intents: buildIntents() }) }).then((item) => item.json());
     attempts = response.attempts || [];
     if (!attempts.length) attempts = [{ title: "Шаг", status: "пусто", detail: response.error || response.note || "брокер не вернул заявки" }];
     attempts.forEach((item) => record(`${item.title}: ${item.status}`));
@@ -530,7 +555,7 @@ async function refresh(force) {
   try {
     const [market, account] = await Promise.all([
       fetch("/api/bonds", { method: "POST" }).then((response) => response.json()),
-      fetch("/api/desk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim() }) }).then((response) => response.json()).catch(() => null),
+      fetch("/api/desk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim(), accountId: localStorage.getItem("carry-account") || "" }) }).then((response) => response.json()).catch(() => null),
     ]);
     board = market;
     if (!picks.rub.length && !picks.usd.length && !picks.cny.length) {
@@ -577,6 +602,10 @@ document.querySelector("#auto").addEventListener("change", (event) => {
   localStorage.setItem("carry-auto", autoOrders ? "1" : "0");
   record(autoOrders ? "Автозаявки разрешены" : "Автозаявки выключены");
   draw();
+});
+document.querySelector("#accountPick").addEventListener("change", (event) => {
+  localStorage.setItem("carry-account", event.target.value);
+  refresh(true);
 });
 document.querySelector("#form").addEventListener("submit", (event) => {
   event.preventDefault();
