@@ -63,6 +63,10 @@
     .panel, .sleeve { background: var(--card); border-radius: 16px; padding: 12px; }
     #strategy.sleeves { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .chip { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 10px; background: var(--bg); font-size: 12px; font-weight: 700; }
+    button.fold { height: auto; width: 100%; padding: 0; background: transparent; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; text-align: left; }
+    button.fold:hover { background: transparent; }
+    button.fold h2::after { content: "  ▴"; font-size: 12px; color: #777; }
+    button.fold.shut h2::after { content: "  ▾"; }
     button.sleeve { height: auto; width: 100%; padding: 12px; text-align: left; cursor: pointer; border: 2px solid transparent; }
     button.sleeve:hover { background: #fff8d6; }
     button.sleeve.open { border-color: #1c1c1c; }
@@ -150,7 +154,7 @@
     </div>
   </section>
   <section class="panel">
-    <div class="top"><h2>Ход стратегии</h2><strong id="stage">Ждёт запуска</strong></div>
+    <button type="button" class="fold" id="foldProgress"><h2>Ход стратегии</h2><strong id="stage">Ждёт запуска</strong></button>
     <div id="progress"></div>
   </section>
   <section class="split">
@@ -244,6 +248,7 @@ tokenInput.value = localStorage.getItem("carry-token") || SANDBOX;
 let accountState = null;
 let attempts = [];
 let openCategory = "";
+let progressOpen = true;
 let stepping = false;
 let board = null;
 let picks = JSON.parse(localStorage.getItem("carry-picks") || '{"rub":[],"usd":[],"cny":[]}');
@@ -659,6 +664,9 @@ function renderProgress(moneyText) {
   blocks.push('<div class="lane"><div class="top"><h3>Рубли</h3><span class="badge ok">свободно</span></div><div>' + moneyText(cash) + ' — это не заявка, а валюта на счёте. Из неё скрипт набирает остальные корзины.</div></div>');
   const stage = !active ? "Стратегия остановлена" : !session.open ? "Биржа закрыта" : lanes.every((lane) => lane.weight <= 0 || valueOf(lane.tickers) + 1000 >= total * lane.weight) ? "План набран" : stepping ? "Выставляю заявки" : "Можно набирать план";
   document.querySelector("#stage").textContent = stage + ". " + session.text;
+  const fold = document.querySelector("#foldProgress");
+  fold.classList.toggle("shut", !progressOpen);
+  document.querySelector("#progress").hidden = !progressOpen;
   document.querySelector("#progress").innerHTML = blocks.join("");
   const box = document.querySelector("#attempts");
   if (box) box.innerHTML = attempts.length ? attempts.map((item) => '<div class="lane"><strong>' + esc(item.sleeve || item.title || "") + '</strong> · ' + esc(item.status || "") + '<div>' + esc(item.detail || "") + '</div><div class="muted">' + esc(item.action || "") + '</div></div>').join("") : '<div class="muted">Здесь появится разбор последнего шага: по какой корзине была заявка и почему биржа ответила именно так.</div>';
@@ -689,6 +697,7 @@ document.body.addEventListener("click", (event) => {
   const opener = event.target.closest("[data-open]");
   if (opener) { openCategory = openCategory === opener.dataset.open ? "" : opener.dataset.open; draw(); }
   if (event.target.closest("#closeCategory")) { openCategory = ""; draw(); }
+  if (event.target.closest("#foldProgress")) { progressOpen = !progressOpen; draw(); }
   if (pairButton) excludePair(pairButton.dataset.pair);
   if (event.target.closest("[data-step]")) step();
 });
