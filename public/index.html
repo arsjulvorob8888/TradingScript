@@ -27,7 +27,7 @@
     button:hover { background: var(--line); }
     button.on, button.add { background: var(--yellow); }
     button.on:hover, button.add:hover { background: var(--yellow-2); }
-    .stat { padding: 8px 12px; }
+    .stat.win { background: #e5f6ea; }
     .down { color: var(--down); }
     .split { display: grid; grid-template-columns: 190px 1fr; gap: 12px; }
     .panel, .sleeve { background: var(--card); border-radius: 16px; padding: 12px; }
@@ -73,9 +73,10 @@
       <div class="muted" id="subtitle">Стратегия остановлена</div>
     </div>
     <div class="stats">
-      <div class="card stat"><div class="muted">Прогноз стратегии</div><strong id="forecast">—</strong></div>
-      <div class="card stat"><div class="muted">Ключевая</div><strong>14%</strong></div>
-      <div class="card stat"><div class="muted">Разрыв</div><strong id="gap">—</strong></div>
+      <div class="card stat" id="forecastCard"><div class="muted">Прогноз стратегии</div><strong id="forecast">—</strong></div>
+      <div class="card stat" id="keyCard"><div class="muted">Ключевая</div><strong>14%</strong></div>
+      <div class="card stat" id="creditCard"><div class="muted">Кредиты, средняя</div><strong>30,1%</strong></div>
+      <div class="card stat" id="gapCard"><div class="muted">Разрыв</div><strong id="gap">—</strong></div>
     </div>
   </header>
   <form id="form">
@@ -266,6 +267,11 @@ function draw() {
     { name: "Облигации", value: Math.round(current.weights.rub * 100) },
   ] : [];
   document.querySelector("#forecast").textContent = current ? current.forecast.toFixed(1) + "%" : "—";
+  const beatsKey = current ? current.forecast > 14 : false;
+  const beatsCredit = current ? current.forecast > 30.12 : false;
+  document.querySelector("#forecastCard").classList.toggle("win", beatsKey && beatsCredit);
+  document.querySelector("#keyCard").classList.toggle("win", beatsKey);
+  document.querySelector("#creditCard").classList.toggle("win", beatsCredit);
   document.querySelector("#status").textContent = active ? "Работает" : "Остановлена";
   document.querySelector("#subtitle").textContent = active ? "Стратегия запущена и следит за доходностью корзин" : "Стратегия остановлена. Запуск — жёлтой кнопкой";
   const toggle = document.querySelector("#toggle");
