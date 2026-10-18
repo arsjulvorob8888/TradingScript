@@ -301,6 +301,7 @@ function draw() {
   mark("#forecastCard", beatsKey && beatsCredit, Boolean(current) && (!beatsKey || !beatsCredit));
   mark("#keyCard", beatsKey, Boolean(current) && !beatsKey);
   mark("#creditCard", beatsCredit, Boolean(current) && !beatsCredit);
+  mark("#gapCard", beatsKey && beatsCredit, Boolean(current) && (!beatsKey || !beatsCredit));
   document.querySelector("#status").textContent = active ? "Работает" : "Остановлена";
   document.querySelector("#subtitle").textContent = active ? "Стратегия запущена и следит за доходностью корзин" : "Стратегия остановлена. Запуск — жёлтой кнопкой";
   const toggle = document.querySelector("#toggle");
