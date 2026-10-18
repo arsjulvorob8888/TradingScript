@@ -48,6 +48,15 @@ function frequency(days, details) {
   return details || "не указана";
 }
 
+function ratingOf(kind, level, ytm, price) {
+  if (kind === "ОФЗ") return { rating: "ОФЗ", risk: "низкий" };
+  const distressed = ytm >= 22 || (price !== null && price < 90);
+  if (level === 1) return { rating: "1 уровень", risk: distressed ? "средний" : "низкий" };
+  if (level === 2) return { rating: "2 уровень", risk: distressed ? "высокий" : "средний" };
+  if (level === 3) return { rating: "3 уровень", risk: "высокий" };
+  return { rating: "не указан", risk: distressed ? "высокий" : "средний" };
+}
+
 function currencyOf(face) {
   if (face === "USD") return "USD";
   if (face === "CNY") return "CNY";
@@ -89,7 +98,7 @@ async function history(board, kind, date) {
       durationDays: num(record.DURATION) ? Math.round(Number(record.DURATION)) : null,
       price,
       turnover: Math.round(Number(record.VALUE || 0)),
-      risk: ytm >= 22 || (price !== null && price < 90 && kind !== "ОФЗ") ? "повышенный" : "обычная",
+      ...ratingOf(currency === "RUB" ? kind : "Валютная", null, ytm, price),
     });
   }
   return bonds;
@@ -98,10 +107,10 @@ async function history(board, kind, date) {
 async function periods(board) {
   const url =
     `https://iss.moex.com/iss/engines/stock/markets/bonds/boards/${board}/securities.json?iss.meta=off&iss.only=securities` +
-    "&securities.columns=SECID,COUPONPERIOD,NEXTCOUPON";
+    "&securities.columns=SECID,COUPONPERIOD,NEXTCOUPON,LISTLEVEL";
   const payload = JSON.parse(await http(url));
   return new Map(
-    (payload.securities?.data || []).map((row) => [String(row[0]), { days: num(row[1]), next: row[2] ? String(row[2]) : null }]),
+    (payload.securities?.data || []).map((row) => [String(row[0]), { days: num(row[1]), next: row[2] ? String(row[2]) : null, level: num(row[3]) }]),
   );
 }
 
@@ -111,7 +120,8 @@ async function enrich(bonds, board) {
     return bonds.map((bond) => {
       const item = extra.get(bond.secid);
       if (!item) return bond;
-      return { ...bond, periodDays: item.days, frequency: frequency(item.days, bond.frequency), nextCoupon: item.next || bond.nextCoupon };
+      const rated = ratingOf(bond.kind, item.level, bond.ytm, bond.price);
+      return { ...bond, periodDays: item.days, frequency: frequency(item.days, bond.frequency), nextCoupon: item.next || bond.nextCoupon, ...rated };
     });
   } catch {
     return bonds;
@@ -153,8 +163,8 @@ export async function listBonds(refresh = false) {
   if (!refresh && cache && Date.now() - cache.at < 5 * 60 * 1000) return cache.board;
   const [ofz, corporate, usd, cny, usdFunding, cnyFunding, lqdt, tmon] = await Promise.all([
     latest("TQOB", "ОФЗ").then((rows) => enrich(rows, "TQOB")),
-    latest("TQCB", "Корпоративная"),
-    latest("TQOD", "Валютная").catch(() => []),
+    latest("TQCB", "Корпоративная").then((rows) => enrich(rows, "TQCB")),
+    latest("TQOD", "Валютная").then((rows) => enrich(rows, "TQOD")).catch(() => []),
     latest("TQOY", "Валютная").then((rows) => enrich(rows, "TQOY")).catch(() => []),
     funding("USDRUBF").catch(() => null),
     funding("CNYRUBF").catch(() => null),

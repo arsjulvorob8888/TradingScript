@@ -29,6 +29,7 @@
     button.on:hover, button.add:hover { background: var(--yellow-2); }
     .stat.win { background: #e5f6ea; }
     .down { color: var(--down); }
+    .up { color: #178a34; }
     .split { display: grid; grid-template-columns: minmax(280px, 340px) 1fr; gap: 12px; }
     .donut { display: flex; align-items: center; gap: 14px; overflow: visible; }
     .donut svg { width: 112px; height: 112px; flex: 0 0 112px; display: block; overflow: visible; }
@@ -128,6 +129,7 @@
       <table>
         <thead><tr>
           <th><button type="button" data-sort="name" data-label="Бумага">Бумага</button></th>
+          <th><button type="button" data-sort="risk" data-label="Риск">Риск</button></th>
           <th><button type="button" data-sort="ytm" data-label="К погашению">К погашению</button></th>
           <th><button type="button" data-sort="coupon" data-label="Купон">Купон</button></th>
           <th><button type="button" data-sort="frequency" data-label="Выплаты">Выплаты</button></th>
@@ -316,7 +318,7 @@ function draw() {
   const priceMin = field("#priceMin");
   const turnoverMin = field("#turnoverMin");
   const visible = (board?.bonds || []).filter((bond) => {
-    if (!risky && bond.risk === "повышенный") return false;
+    if (!risky && bond.risk === "высокий") return false;
     if (query && !`${bond.name} ${bond.secid}`.toLowerCase().includes(query)) return false;
     if (ytmMin !== null && bond.ytm < ytmMin) return false;
     if (ytmMax !== null && bond.ytm > ytmMax) return false;
@@ -331,7 +333,7 @@ function draw() {
     if (filter === "USD") return bond.currency === "USD";
     return bond.currency === "CNY";
   }).sort((a, b) => {
-    const pick = (bond) => sortKey === "name" ? bond.name : sortKey === "coupon" ? bond.coupon ?? -1 : sortKey === "frequency" ? bond.frequency : sortKey === "maturity" ? bond.maturity || "" : sortKey === "duration" ? bond.durationDays ?? -1 : sortKey === "price" ? bond.price ?? -1 : sortKey === "turnover" ? bond.turnover : bond.ytm;
+    const pick = (bond) => sortKey === "name" ? bond.name : sortKey === "risk" ? ({ низкий: 1, средний: 2, высокий: 3 }[bond.risk] || 2) : sortKey === "coupon" ? bond.coupon ?? -1 : sortKey === "frequency" ? bond.frequency : sortKey === "maturity" ? bond.maturity || "" : sortKey === "duration" ? bond.durationDays ?? -1 : sortKey === "price" ? bond.price ?? -1 : sortKey === "turnover" ? bond.turnover : bond.ytm;
     const left = pick(a);
     const right = pick(b);
     const order = left > right ? 1 : left < right ? -1 : 0;
@@ -341,7 +343,7 @@ function draw() {
   document.querySelector("#rows").innerHTML = visible.map((bond) => {
     const action = bond.currency === "USD" ? "usd:В пару $" : bond.currency === "CNY" ? "cny:В пару ¥" : "rub:В рублёвые";
     const [sleeveName, label] = action.split(":");
-    return `<tr><td><strong>${esc(bond.name)}</strong><div class="muted">${esc(bond.kind)}${bond.risk === "повышенный" ? " · повышенный риск" : ""}</div></td><td><strong>${bond.ytm.toFixed(2)}%</strong>${bond.offerYield ? `<div class="muted">к оферте ${bond.offerYield.toFixed(1)}%</div>` : ""}</td><td>${bond.coupon === null ? "плавающий" : bond.coupon.toFixed(2) + "%"}${bond.couponYield ? `<div class="muted">текущая ${bond.couponYield.toFixed(1)}%</div>` : ""}</td><td>${esc(bond.frequency)}<div class="muted">${esc(bond.nextCoupon || "")}</div></td><td>${esc(bond.maturity || "нет даты")}</td><td>${bond.durationDays ? (bond.durationDays / 365).toFixed(1) + " г." : "—"}</td><td>${bond.price?.toFixed(2) ?? "—"}</td><td>${bond.turnover ? (bond.turnover / 1e6).toFixed(1) + " млн" : "—"}</td><td><button class="add" data-add="${sleeveName}:${bond.secid}">${picks[sleeveName].includes(bond.secid) ? "Добавлено" : label}</button></td></tr>`;
+    return `<tr><td><strong>${esc(bond.name)}</strong><div class="muted">${esc(bond.kind)}</div></td><td class="${bond.risk === "высокий" ? "down" : bond.risk === "низкий" ? "up" : ""}"><strong>${esc(bond.rating || "не указан")}</strong><div class="muted">${esc(bond.risk || "")}</div></td><td><strong>${bond.ytm.toFixed(2)}%</strong>${bond.offerYield ? `<div class="muted">к оферте ${bond.offerYield.toFixed(1)}%</div>` : ""}</td><td>${bond.coupon === null ? "плавающий" : bond.coupon.toFixed(2) + "%"}${bond.couponYield ? `<div class="muted">текущая ${bond.couponYield.toFixed(1)}%</div>` : ""}</td><td>${esc(bond.frequency)}<div class="muted">${esc(bond.nextCoupon || "")}</div></td><td>${esc(bond.maturity || "нет даты")}</td><td>${bond.durationDays ? (bond.durationDays / 365).toFixed(1) + " г." : "—"}</td><td>${bond.price?.toFixed(2) ?? "—"}</td><td>${bond.turnover ? (bond.turnover / 1e6).toFixed(1) + " млн" : "—"}</td><td><button class="add" data-add="${sleeveName}:${bond.secid}">${picks[sleeveName].includes(bond.secid) ? "Добавлено" : label}</button></td></tr>`;
   }).join("");
 }
 document.body.addEventListener("click", (event) => {
@@ -379,7 +381,7 @@ async function refresh(force) {
     ]);
     board = market;
     if (!picks.rub.length && !picks.usd.length && !picks.cny.length) {
-      const liquid = (market.bonds || []).filter((bond) => bond.kind === "ОФЗ" && bond.ytm >= 16 && bond.ytm <= 17 && bond.risk === "обычная").sort((a, b) => b.turnover - a.turnover)[0];
+      const liquid = (market.bonds || []).filter((bond) => bond.kind === "ОФЗ" && bond.ytm >= 16 && bond.ytm <= 17 && bond.risk === "низкий").sort((a, b) => b.turnover - a.turnover)[0];
       if (liquid) picks.rub = [liquid.secid];
       save();
     }
