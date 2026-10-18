@@ -4,6 +4,7 @@ import { request as httpsRequest } from "node:https";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setDefaultResultOrder } from "node:dns";
+import { listBonds } from "./bonds.mjs";
 
 setDefaultResultOrder("ipv4first");
 
@@ -204,6 +205,12 @@ async function desk(token) {
 const port = Number(process.env.PORT || 8080);
 createServer(async (req, res) => {
   try {
+    if (req.method === "POST" && req.url === "/api/bonds") {
+      const payload = JSON.stringify(await listBonds(true));
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(payload);
+      return;
+    }
     if (req.method === "POST" && req.url === "/api/desk") {
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);

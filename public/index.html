@@ -66,6 +66,7 @@
     </div>
     <aside id="meters"></aside>
   </section>
+  <section id="catalog"></section>
   <table>
     <thead><tr><th>Инструмент</th><th>Группа</th><th>План</th><th>Факт</th><th>Доходность</th></tr></thead>
     <tbody id="rows"></tbody>
@@ -144,6 +145,10 @@ document.querySelector("#form").addEventListener("submit", (event) => {
 });
 document.querySelector("#launch").addEventListener("click", () => load(true));
 load(false);
+fetch("/api/bonds", { method: "POST" }).then((response) => response.json()).then((board) => {
+  const rows = (board.bonds || []).filter((bond) => bond.kind === "ОФЗ" && bond.risk === "обычная").slice(0, 12);
+  document.querySelector("#catalog").innerHTML = `<div class="note">Каталог с биржи. 13,2% была короткая ОФЗ 26232. Ниже доходность к погашению.</div><table><thead><tr><th>Бумага</th><th>К погашению</th><th>Купон</th><th>Выплаты</th><th>Погашение</th><th>Дюрация</th></tr></thead><tbody>${rows.map((bond) => `<tr><td>${bond.name}</td><td>${bond.ytm.toFixed(2)}%</td><td>${bond.coupon ?? "плавающий"}%</td><td>${bond.frequency}</td><td>${bond.maturity || "—"}</td><td>${bond.durationDays ? (bond.durationDays / 365).toFixed(1) + " г." : "—"}</td></tr>`).join("")}</tbody></table>`;
+}).catch(() => {});
 </script>
 </body>
 </html>
