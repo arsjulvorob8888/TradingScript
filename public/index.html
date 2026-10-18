@@ -29,7 +29,9 @@
     button.on:hover, button.add:hover { background: var(--yellow-2); }
     .stat.win { background: #e5f6ea; }
     .down { color: var(--down); }
-    .split { display: grid; grid-template-columns: 190px 1fr; gap: 12px; }
+    .split { display: grid; grid-template-columns: minmax(280px, 340px) 1fr; gap: 12px; }
+    .donut { display: flex; align-items: center; gap: 14px; overflow: visible; }
+    .donut svg { width: 112px; height: 112px; flex: 0 0 112px; display: block; overflow: visible; }
     .panel, .sleeve { background: var(--card); border-radius: 16px; padding: 12px; }
     .sleeves { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
     .sleeve h2 { margin: 0; font-size: 14px; }
@@ -38,7 +40,6 @@
     .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
     .chips button { height: 28px; background: var(--bg); font-size: 12px; }
     svg { width: 96px; height: 96px; }
-    .donut { display: flex; align-items: center; gap: 8px; }
     .ranges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
     .ranges label { display: grid; gap: 2px; color: var(--muted); font-size: 11px; }
     .ranges input, .ranges select { width: 118px; height: 36px; background: var(--bg); }
@@ -232,9 +233,10 @@ function ring(parts) {
     const large = slice > Math.PI ? 1 : 0;
     const a = [Math.cos(start), Math.sin(start)];
     const b = [Math.cos(angle - 0.001), Math.sin(angle - 0.001)];
-    return `<path d="M ${50 + a[0]*28} ${50 + a[1]*28} A 28 28 0 ${large} 1 ${50 + b[0]*28} ${50 + b[1]*28}" stroke="${item.color || colors[item.name]}" stroke-width="14" fill="none"/>`;
+    return `<path d="M ${50 + a[0]*30} ${50 + a[1]*30} A 30 30 0 ${large} 1 ${50 + b[0]*30} ${50 + b[1]*30}" stroke="${item.color || colors[item.name]}" stroke-width="12" fill="none"/>`;
   }).join("");
-  document.querySelector("#ring").innerHTML = `<circle cx="50" cy="50" r="28" stroke="#e6e8ec" stroke-width="14" fill="none"/>${arcs}`;
+  document.querySelector("#ring").setAttribute("viewBox", "0 0 100 100");
+  document.querySelector("#ring").innerHTML = `<circle cx="50" cy="50" r="30" stroke="#e6e8ec" stroke-width="12" fill="none"/>${arcs}`;
 }
 function save() { localStorage.setItem("carry-picks", JSON.stringify(picks)); }
 function choose(sleeve, secid) {
