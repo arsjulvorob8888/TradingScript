@@ -7,6 +7,12 @@
   <style>
     :root { color-scheme: light; --bg:#f3f4f6; --card:#fff; --ink:#1c1c1c; --muted:#8b919a; --line:#e6e8ec; --yellow:#ffdd2d; --yellow-2:#f5c400; --down:#d0121a; }
     * { box-sizing: border-box; }
+    nav { display: flex; gap: 8px; }
+    [data-page] { display: grid; gap: 12px; }
+    nav a { text-decoration: none; color: inherit; background: var(--card); border-radius: 12px; padding: 8px 14px; font-weight: 700; }
+    nav a.on { background: var(--yellow); }
+    nav a:hover { background: var(--line); }
+    nav a.on:hover { background: var(--yellow-2); }
     body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 "Segoe UI", sans-serif; }
     main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
     h1 { margin: 0; font-size: 26px; }
@@ -43,6 +49,12 @@
 </head>
 <body>
 <main>
+  <nav>
+    <a href="/" data-nav="/">Портфель</a>
+    <a href="/bonds" data-nav="/bonds">Облигации</a>
+    <a href="/strategy" data-nav="/strategy">Стратегия</a>
+  </nav>
+  <section data-page="/">
   <header>
     <div>
       <div class="muted kicker">ИНВЕСТИЦИИ</div>
@@ -64,7 +76,8 @@
     <div class="panel donut"><svg id="ring"></svg><div id="legend"></div></div>
     <div class="sleeves" id="sleeves"></div>
   </section>
-  <section class="panel">
+  </section>
+  <section class="panel" data-page="/bonds">
     <div class="filters">
       <div id="filters"></div>
       <input id="query" placeholder="Название или ISIN" />
@@ -76,6 +89,14 @@
         <tbody id="rows"></tbody>
       </table>
     </div>
+  </section>
+  <section data-page="/strategy">
+    <header>
+      <div class="muted kicker">СОСТАВ</div>
+      <h1>Стратегия</h1>
+      <div class="muted">Три корзины. Если валютная пара слабее денежного рынка, её доля уходит в рублёвые облигации и фонды.</div>
+    </header>
+    <div class="sleeves" id="strategy"></div>
   </section>
 </main>
 <script>
@@ -166,7 +187,8 @@ function draw() {
   const rub = selected("rub");
   const usd = selected("usd");
   const cny = selected("cny");
-  document.querySelector("#sleeves").innerHTML = [
+  document.querySelector("#sleeves").innerHTML = groups.map((item) => `<div class="sleeve"><div class="top"><h2>${item.name}</h2><div class="value">${item.value}%</div></div></div>`).join("");
+  document.querySelector("#strategy").innerHTML = [
     sleeve("Рублёвые", current ? current.rubYtm : null, rub, "доходность к погашению", "rub"),
     sleeve("Пара доллар", current ? current.usd : null, usd, usd.length ? "облигация плюс шорт фьючерса" : "не выбрана, в расчёте 10,9%", "usd"),
     sleeve("Пара юань", current ? current.cny : null, cny, cny.length ? "облигация плюс шорт фьючерса" : "не выбрана, в расчёте 14,2%", "cny"),
@@ -190,6 +212,12 @@ function draw() {
   }).join("");
 }
 document.body.addEventListener("click", (event) => {
+  const link = event.target.closest("[data-nav]");
+  if (link) {
+    event.preventDefault();
+    history.pushState({}, "", link.dataset.nav);
+    showPage();
+  }
   const filterButton = event.target.closest("[data-filter]");
   const riskButton = event.target.closest("[data-risk]");
   const add = event.target.closest("[data-add]");
@@ -228,6 +256,13 @@ document.querySelector("#form").addEventListener("submit", (event) => {
   localStorage.setItem("carry-token", tokenInput.value.trim());
   refresh(true);
 });
+function showPage() {
+  const path = location.pathname === "/bonds" || location.pathname === "/strategy" ? location.pathname : "/";
+  document.querySelectorAll("[data-page]").forEach((section) => { section.hidden = section.dataset.page !== path; });
+  document.querySelectorAll("[data-nav]").forEach((link) => link.classList.toggle("on", link.dataset.nav === path));
+}
+window.addEventListener("popstate", showPage);
+showPage();
 refresh(false);
 </script>
 </body>
