@@ -40,7 +40,8 @@
     .stat.lose { background: #fde8ea; }
     .down { color: var(--down); }
     .up { color: #178a34; }
-    .split { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 12px; }
+    .sleeves { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .split { display: grid; grid-template-columns: minmax(220px, 280px) 1fr; gap: 12px; }
     .rings { display: flex; align-items: center; justify-content: space-around; gap: 8px; }
     .donut { display: flex; flex-direction: column; align-items: center; gap: 4px; }
     .donut svg { width: 104px; height: 104px; flex: 0 0 104px; display: block; }
@@ -219,7 +220,7 @@
 </main>
 <script>
 const SANDBOX = "t.FYCrHI6u8UGEs6RhUrpV0ixAVRFCJg0IowCXxQ7uOQdNwgSsO5o42B9hhvN9UxtVkVZPj9FYgZOJVvAcWRN5OA";
-const colors = { Пары: "#ffdd2d", Фонды: "#3b78f0", Рублёвые: "#2a2a2a", Деньги: "#d5d8de" };
+const colors = { "Пары": "#ffdd2d", "Фонды": "#3b78f0", "Рублёвые облигации": "#2a2a2a", "Рубли": "#c5c9d0" };
 const tokenInput = document.querySelector("#token");
 tokenInput.value = localStorage.getItem("carry-token") || SANDBOX;
 let accountState = null;
@@ -370,8 +371,13 @@ function draw() {
   const groups = current ? [
     { name: "Пары", value: Math.round((current.weights.usd + current.weights.cny) * 100) },
     { name: "Фонды", value: Math.round((current.weights.lqdt + current.weights.tmon) * 100) },
-    { name: "Рублёвые", value: Math.round(current.weights.rub * 100) },
-  ] : [];
+    { name: "Рублёвые облигации", value: Math.round(current.weights.rub * 100) },
+  ] : [
+    { name: "Пары", value: 0 },
+    { name: "Фонды", value: 0 },
+    { name: "Рублёвые облигации", value: 0 },
+  ];
+  groups.push({ name: "Рубли", value: Math.max(0, 100 - groups.reduce((sum, item) => sum + item.value, 0)) });
   document.querySelector("#forecast").textContent = current ? current.forecast.toFixed(1) + "%" : "—";
   const beatsKey = current ? current.forecast > 14 : false;
   const beatsCredit = current ? current.forecast > 30.12 : false;
@@ -410,21 +416,25 @@ function draw() {
   }
   ring("#ring", groups);
   const held = accountState?.account?.positions || [];
-  const factBuckets = { "Пары": 0, "Фонды": 0, "Рублёвые": 0 };
+  const factBuckets = { "Пары": 0, "Фонды": 0, "Рублёвые облигации": 0 };
   held.forEach((item) => {
-    const name = item.group === "Фонды" ? "Фонды" : item.group === "Пары" || item.group.includes("Доллар") || item.group.includes("Юан") || item.group.includes("Евро") ? "Пары" : item.group.includes("облигац") || item.group === "Облигации" ? "Рублёвые" : "";
+    if (String(item.ticker || "").endsWith("UTSTOM") || item.group === "Деньги" || item.group === "Рубли") return;
+    const name = item.group === "Фонды" ? "Фонды" : item.group === "Пары" || item.group.includes("Доллар") || item.group.includes("Юан") || item.group.includes("Евро") ? "Пары" : item.group.includes("облигац") || item.group === "Облигации" ? "Рублёвые облигации" : "";
     if (factBuckets[name] !== undefined) factBuckets[name] += item.value;
   });
-  const factBase = accountState?.account?.total || factBuckets["Пары"] + factBuckets["Фонды"] + factBuckets["Рублёвые"] || 1;
-  const factGroups = ["Пары", "Фонды", "Рублёвые"].map((name) => ({ name, value: Math.round(factBuckets[name] / factBase * 100) }));
-  const cashShare = Math.max(0, 100 - factGroups.reduce((sum, item) => sum + item.value, 0));
-  ring("#ringFact", factGroups.concat([{ name: "Деньги", value: cashShare }]));
+  const cashRows = held.filter((item) => String(item.ticker || "").endsWith("UTSTOM") || item.group === "Деньги" || item.group === "Рубли").reduce((sum, item) => sum + item.value, 0);
+  const cash = accountState?.account?.cash || cashRows;
+  const factBase = accountState?.account?.total || factBuckets["Пары"] + factBuckets["Фонды"] + factBuckets["Рублёвые облигации"] + cash || 1;
+  const factGroups = ["Пары", "Фонды", "Рублёвые облигации"].map((name) => ({ name, value: Math.round(factBuckets[name] / factBase * 100) }));
+  factGroups.push({ name: "Рубли", value: Math.round(cash / factBase * 100) });
+  ring("#ringFact", factGroups);
   const hints = {
     "Пары": current ? "доллар " + (current.usd == null ? "нет бумаги" : current.usd.toFixed(1) + "%") + " · юань " + (current.cny == null ? "нет бумаги" : current.cny.toFixed(1) + "%") : "",
     "Фонды": board ? "LQDT " + board.lqdt.toFixed(1) + "% · TMON " + board.tmon.toFixed(1) + "%" : "",
-    "Рублёвые": current && current.rubYtm != null ? "к погашению " + current.rubYtm.toFixed(1) + "%" : "облигации не выбраны",
+    "Рублёвые облигации": current && current.rubYtm != null ? "к погашению " + current.rubYtm.toFixed(1) + "%" : "облигации не выбраны",
+    "Рубли": "валюта на счёте",
   };
-  document.querySelector("#sleeves").innerHTML = ["Пары", "Фонды", "Рублёвые"].map((name) => {
+  document.querySelector("#sleeves").innerHTML = ["Пары", "Фонды", "Рублёвые облигации", "Рубли"].map((name) => {
     const planItem = groups.find((item) => item.name === name);
     const factItem = factGroups.find((item) => item.name === name);
     const plan = planItem ? planItem.value : 0;
