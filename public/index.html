@@ -32,9 +32,12 @@
     .stat.lose { background: #fde8ea; }
     .down { color: var(--down); }
     .up { color: #178a34; }
-    .split { display: grid; grid-template-columns: minmax(280px, 340px) 1fr; gap: 12px; }
-    .donut { display: flex; align-items: center; gap: 14px; overflow: visible; }
-    .donut svg { width: 112px; height: 112px; flex: 0 0 112px; display: block; overflow: visible; }
+    .split { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 12px; }
+    .rings { display: flex; align-items: center; justify-content: space-around; gap: 8px; }
+    .donut { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .donut svg { width: 104px; height: 104px; flex: 0 0 104px; display: block; }
+    .compare { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; }
+    .compare strong { display: block; font-size: 18px; }
     .panel, .sleeve { background: var(--card); border-radius: 16px; padding: 12px; }
     .sleeves { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
     .sleeve h2 { margin: 0; font-size: 14px; }
@@ -125,7 +128,10 @@
     </div>
   </section>
   <section class="split">
-    <div class="panel donut"><svg id="ring"></svg><div id="legend"></div></div>
+    <div class="panel rings">
+      <div class="donut"><div class="muted">План</div><svg id="ring"></svg></div>
+      <div class="donut"><div class="muted">Факт</div><svg id="ringFact"></svg></div>
+    </div>
     <div class="sleeves" id="sleeves"></div>
   </section>
   <section class="panel">
@@ -207,7 +213,7 @@
 </main>
 <script>
 const SANDBOX = "t.FYCrHI6u8UGEs6RhUrpV0ixAVRFCJg0IowCXxQ7uOQdNwgSsO5o42B9hhvN9UxtVkVZPj9FYgZOJVvAcWRN5OA";
-const colors = { Пары: "#ffdd2d", Фонды: "#3b78f0", Облигации: "#2a2a2a" };
+const colors = { Пары: "#ffdd2d", Фонды: "#3b78f0", Рублёвые: "#2a2a2a", Деньги: "#d5d8de" };
 const tokenInput = document.querySelector("#token");
 tokenInput.value = localStorage.getItem("carry-token") || SANDBOX;
 let accountState = null;
@@ -290,11 +296,12 @@ function model() {
   const forecast = weights.usd * (usd || 0) + weights.cny * (cny || 0) + weights.rub * (rubYtm || 0) + weights.lqdt * board.lqdt + weights.tmon * board.tmon;
   return { rubYtm, usd, cny, fundingUsd: board.fundingUsd, fundingCny: board.fundingCny, weights, forecast };
 }
-function ring(parts) {
-  const data = parts.length ? parts : [{ name: "Пусто", value: 1, color: "#e6e8ec" }];
-  const total = data.reduce((sum, item) => sum + item.value, 0) || 1;
+function ring(id, parts) {
+  const data = parts.filter((item) => item.value > 0);
+  const rows = data.length ? data : [{ name: "Пусто", value: 1, color: "#e6e8ec" }];
+  const total = rows.reduce((sum, item) => sum + item.value, 0) || 1;
   let angle = -Math.PI / 2;
-  const arcs = data.map((item) => {
+  const arcs = rows.map((item) => {
     const slice = (item.value / total) * Math.PI * 2;
     const start = angle;
     angle += slice;
@@ -303,8 +310,9 @@ function ring(parts) {
     const b = [Math.cos(angle - 0.001), Math.sin(angle - 0.001)];
     return `<path d="M ${50 + a[0]*30} ${50 + a[1]*30} A 30 30 0 ${large} 1 ${50 + b[0]*30} ${50 + b[1]*30}" stroke="${item.color || colors[item.name]}" stroke-width="12" fill="none"/>`;
   }).join("");
-  document.querySelector("#ring").setAttribute("viewBox", "0 0 100 100");
-  document.querySelector("#ring").innerHTML = `<circle cx="50" cy="50" r="30" stroke="#e6e8ec" stroke-width="12" fill="none"/>${arcs}`;
+  const node = document.querySelector(id);
+  node.setAttribute("viewBox", "0 0 100 100");
+  node.innerHTML = `<circle cx="50" cy="50" r="30" stroke="#e6e8ec" stroke-width="12" fill="none"/>${arcs}`;
 }
 function save() { localStorage.setItem("carry-picks", JSON.stringify(picks)); }
 function saveExcluded() { localStorage.setItem("carry-excluded", JSON.stringify(excluded)); }
@@ -349,7 +357,7 @@ function draw() {
   const groups = current ? [
     { name: "Пары", value: Math.round((current.weights.usd + current.weights.cny) * 100) },
     { name: "Фонды", value: Math.round((current.weights.lqdt + current.weights.tmon) * 100) },
-    { name: "Облигации", value: Math.round(current.weights.rub * 100) },
+    { name: "Рублёвые", value: Math.round(current.weights.rub * 100) },
   ] : [];
   document.querySelector("#forecast").textContent = current ? current.forecast.toFixed(1) + "%" : "—";
   const beatsKey = current ? current.forecast > 14 : false;
@@ -387,12 +395,32 @@ function draw() {
     gap.textContent = (delta >= 0 ? "+" : "") + delta.toFixed(1) + " п.п.";
     gap.className = delta < 0 ? "down" : "";
   }
-  ring(groups);
-  document.querySelector("#legend").innerHTML = groups.map((item) => `<div>${item.name} <strong>${item.value}%</strong></div>`).join("");
+  ring("#ring", groups);
+  const held = accountState?.account?.positions || [];
+  const factBuckets = { "Пары": 0, "Фонды": 0, "Рублёвые": 0 };
+  held.forEach((item) => {
+    const name = item.group === "Облигации" ? "Рублёвые" : item.group;
+    if (factBuckets[name] !== undefined) factBuckets[name] += item.value;
+  });
+  const factBase = accountState?.account?.total || factBuckets["Пары"] + factBuckets["Фонды"] + factBuckets["Рублёвые"] || 1;
+  const factGroups = ["Пары", "Фонды", "Рублёвые"].map((name) => ({ name, value: Math.round(factBuckets[name] / factBase * 100) }));
+  const cashShare = Math.max(0, 100 - factGroups.reduce((sum, item) => sum + item.value, 0));
+  ring("#ringFact", factGroups.concat([{ name: "Деньги", value: cashShare }]));
+  const hints = {
+    "Пары": current ? "доллар " + (current.usd == null ? "нет бумаги" : current.usd.toFixed(1) + "%") + " · юань " + (current.cny == null ? "нет бумаги" : current.cny.toFixed(1) + "%") : "",
+    "Фонды": board ? "LQDT " + board.lqdt.toFixed(1) + "% · TMON " + board.tmon.toFixed(1) + "%" : "",
+    "Рублёвые": current && current.rubYtm != null ? "к погашению " + current.rubYtm.toFixed(1) + "%" : "облигации не выбраны",
+  };
+  document.querySelector("#sleeves").innerHTML = ["Пары", "Фонды", "Рублёвые"].map((name) => {
+    const planItem = groups.find((item) => item.name === name);
+    const factItem = factGroups.find((item) => item.name === name);
+    const plan = planItem ? planItem.value : 0;
+    const fact = factItem ? factItem.value : 0;
+    return '<div class="sleeve"><h2>' + name + '</h2><div class="compare"><div><span class="muted">План</span><strong>' + plan + '%</strong></div><div><span class="muted">Факт</span><strong>' + fact + '%</strong></div></div><div class="muted">' + hints[name] + '</div></div>';
+  }).join("");
   const rub = selected("rub");
   const usd = selected("usd");
   const cny = selected("cny");
-  document.querySelector("#sleeves").innerHTML = groups.map((item) => `<div class="sleeve"><div class="top"><h2>${item.name}</h2><div class="value">${item.value}%</div></div></div>`).join("");
   document.querySelector("#strategy").innerHTML = [
     sleeve("Рублёвые", current?.rubYtm ?? null, rub, rub.length ? "доходность к погашению выбранных облигаций" : "облигации не выбраны, доходность не считается", "rub"),
     sleeve("Пара доллар", usd.length ? current?.usd ?? null : current?.fundingUsd ?? null, usd, usd.length ? "облигация плюс фандинг шорта, валюта хеджируется" : "облигация не выбрана. Доходность указана только с учётом средней доходности от фандинга и не учитывает валютные колебания", "usd"),
