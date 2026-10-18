@@ -110,7 +110,7 @@ let filter = "ОФЗ";
 let risky = false;
 
 function esc(value) {
-  return String(value ?? "").replace(/[&<>"]/g, (char) => ({ "&": "&", "<": "<", ">": ">", '"': """ }[char]));
+  return String(value ?? "").replace(/[&<>"]/g, (char) => char === "&" ? "\u0026amp;" : char === "<" ? "\u0026lt;" : char === ">" ? "\u0026gt;" : "\u0026quot;");
 }
 function avg(list) { return list.length ? list.reduce((sum, bond) => sum + bond.ytm, 0) / list.length : null; }
 function carry(ytm, funding, price) {
