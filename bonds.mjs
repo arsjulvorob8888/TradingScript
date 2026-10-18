@@ -128,6 +128,19 @@ async function enrich(bonds, board) {
   }
 }
 
+async function priceMove(ticker) {
+  const payload = JSON.parse(
+    await http(
+      `https://iss.moex.com/iss/history/engines/futures/markets/forts/securities/${ticker}.json?from=2026-09-01&iss.meta=off&history.columns=TRADEDATE,SETTLEPRICE`,
+    ),
+  );
+  const prices = (payload.history?.data || []).map((row) => Number(row[1])).filter((price) => price > 0);
+  if (prices.length < 6) return 0;
+  const last = prices[prices.length - 1];
+  const base = prices[Math.max(0, prices.length - 21)];
+  return Math.round((last / base - 1) * 1000) / 10;
+}
+
 async function funding(ticker) {
   const payload = JSON.parse(
     await http(
@@ -161,13 +174,15 @@ async function latest(board, kind) {
 
 export async function listBonds(refresh = false) {
   if (!refresh && cache && Date.now() - cache.at < 5 * 60 * 1000) return cache.board;
-  const [ofz, corporate, usd, cny, usdFunding, cnyFunding, lqdt, tmon] = await Promise.all([
+  const [ofz, corporate, usd, cny, usdFunding, cnyFunding, usdMove, cnyMove, lqdt, tmon] = await Promise.all([
     latest("TQOB", "ОФЗ").then((rows) => enrich(rows, "TQOB")),
     latest("TQCB", "Корпоративная").then((rows) => enrich(rows, "TQCB")),
     latest("TQOD", "Валютная").then((rows) => enrich(rows, "TQOD")).catch(() => []),
     latest("TQOY", "Валютная").then((rows) => enrich(rows, "TQOY")).catch(() => []),
     funding("USDRUBF").catch(() => null),
     funding("CNYRUBF").catch(() => null),
+    priceMove("USDRUBF").catch(() => 0),
+    priceMove("CNYRUBF").catch(() => 0),
     fundYield("LQDT").catch(() => null),
     fundYield("TMON").catch(() => null),
   ]);
@@ -177,6 +192,8 @@ export async function listBonds(refresh = false) {
     keyRate: 14,
     fundingUsd: Math.round((usdFunding ?? 5) * 10) / 10,
     fundingCny: Math.round((cnyFunding ?? 8.6) * 10) / 10,
+    usdMove: usdMove || 0,
+    cnyMove: cnyMove || 0,
     lqdt: Math.round((lqdt ?? 13.53) * 10) / 10,
     tmon: Math.round((tmon ?? 12.93) * 10) / 10,
     bonds,
