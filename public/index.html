@@ -48,6 +48,14 @@
     .pair-card svg { width: 92px; height: 92px; }
     .pair-card h3 { margin: 4px 0 0; font-size: 13px; }
     .shift { color: #9a6700; font-weight: 700; }
+    .lane { padding: 10px 0; border-top: 1px solid var(--line); }
+    .lane h3 { margin: 0; font-size: 14px; }
+    .bar { height: 8px; margin: 6px 0; background: #eceff3; border-radius: 99px; overflow: hidden; }
+    .bar span { display: block; height: 100%; background: #1c1c1c; }
+    .badge { font-size: 12px; font-weight: 700; }
+    .badge.ok { color: #178a34; }
+    .badge.wait { color: #9a6700; }
+    .badge.bad { color: var(--down); }
     .donut { display: flex; flex-direction: column; align-items: center; gap: 4px; }
     .donut svg { width: 104px; height: 104px; flex: 0 0 104px; display: block; }
     .compare { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; }
@@ -138,6 +146,10 @@
       <div id="log"></div>
     </div>
   </section>
+  <section class="panel">
+    <div class="top"><h2>Ход стратегии</h2><strong id="stage">Ждёт запуска</strong></div>
+    <div id="progress"></div>
+  </section>
   <section class="split">
     <div class="panel rings">
       <div class="donut"><div class="muted">План</div><svg id="ring"></svg></div>
@@ -199,7 +211,7 @@
     <div class="sleeves" id="strategy"></div>
     <section class="panel">
       <div class="top"><h2>Заявки</h2><button type="button" data-step class="add">Сделать шаг</button></div>
-      <div id="attempts" class="muted">Шаг ещё не выполнялся. Он ставит рыночные заявки на 1 лот по выбранным бумагам, фондам и шорту фьючерса.</div>
+      <div id="attempts"></div>
     </section>
     <section class="panel">
       <h2>Открытые заявки брокера</h2>
@@ -565,7 +577,73 @@ function draw() {
   document.querySelector("#liveOrders").innerHTML = orders.length ? orders.map((item) => `<tr><td>${esc(item.ticker)}</td><td>${esc(item.direction)}</td><td>${item.lots}</td><td>${item.done}</td><td>${esc(String(item.status).replace("EXECUTION_REPORT_STATUS_", ""))}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">Открытых заявок нет</td></tr>`;
   const ops = accountState?.operations || [];
   document.querySelector("#operations").innerHTML = ops.length ? ops.map((item) => `<tr><td>${esc((item.date || "").replace("T", " ").slice(0, 16))}</td><td>${esc(item.type)}</td><td>${esc(item.name)}</td><td>${item.quantity || "—"}</td><td>${item.payment ? Math.round(item.payment).toLocaleString("ru-RU") + " ₽" : "—"}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">Операций за 30 дней нет</td></tr>`;
-  if (attempts.length) document.querySelector("#attempts").innerHTML = attempts.map((item) => `<div><strong>${esc(item.status)}</strong> ${esc(item.title)} · ${esc(item.detail || "")}</div>`).join("");
+  renderProgress(moneyText);
+}
+function sessionNow() {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Moscow", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
+  const pick = (type) => (parts.find((item) => item.type === type) || {}).value || "";
+  const day = pick("weekday");
+  const minutes = Number(pick("hour")) * 60 + Number(pick("minute"));
+  if (day === "Sat" || day === "Sun") return { open: false, text: "Биржа закрыта: выходной. Следующая основная сессия — понедельник, 10:00 мск." };
+  if (minutes >= 600 && minutes < 1130) return { open: true, text: "Сейчас основная сессия, до 18:50 мск." };
+  if (minutes >= 1145 && minutes < 1430) return { open: true, text: "Сейчас вечерняя сессия, до 23:50 мск. Многие облигации торгуются только днём." };
+  return { open: false, text: "Биржа закрыта. Ближайшая основная сессия " + (minutes < 600 ? "сегодня" : "завтра") + " в 10:00 мск." };
+}
+function renderProgress(moneyText) {
+  const current = model();
+  const account = accountState?.account;
+  const total = account?.total || 0;
+  const positions = account?.positions || [];
+  const session = sessionNow();
+  const valueOf = (tickers) => positions.filter((item) => tickers.includes(item.ticker)).reduce((sum, item) => sum + item.value, 0);
+  const lanes = [
+    { name: "Пары", weight: current ? current.weights.usd + current.weights.cny : 0, tickers: selected("usd").map((bond) => bond.secid).concat(selected("cny").map((bond) => bond.secid), ["USDRUBF", "CNYRUBF"]), hint: "долларовая и юаневая облигация плюс шорт фьючерса" },
+    { name: "Фонды", weight: current ? current.weights.lqdt + current.weights.tmon : 0, tickers: ["LQDT", "TMON"], hint: "LQDT и TMON" },
+    { name: "Рублёвые облигации", weight: current ? current.weights.rub : 0, tickers: selected("rub").map((bond) => bond.secid), hint: "выбранные рублёвые выпуски" },
+  ];
+  const blocks = lanes.map((lane) => {
+    const target = total * lane.weight;
+    const have = valueOf(lane.tickers);
+    const related = attempts.filter((item) => lane.tickers.includes(item.ticker) || item.sleeve === lane.name || item.title === lane.name);
+    const last = related[related.length - 1];
+    const full = target < 1000 || have + 1000 >= target;
+    let badge = "ждёт";
+    let cls = "wait";
+    let text = "";
+    let action = "";
+    if (reinvest && reinvestTo === "cash") {
+      badge = "в рублях"; text = "Покупки выключены: купоны и фандинг остаются рублями."; action = "Чтобы набирать корзину, выберите другую цель реинвеста.";
+    } else if (!active) {
+      badge = "остановлена"; text = "Скрипт ничего не выставляет."; action = "Нажмите «Запустить стратегию».";
+    } else if (lane.tickers.filter((ticker) => ticker !== "USDRUBF" && ticker !== "CNYRUBF" && ticker !== "LQDT" && ticker !== "TMON").length === 0 && lane.name !== "Фонды") {
+      badge = "нет бумаги"; text = "В эту корзину не добавлен инструмент, поэтому сделок нет."; action = "Откройте «Облигации» и добавьте выпуск в эту категорию.";
+    } else if (lane.weight <= 0) {
+      badge = "вне плана"; text = "Доля этой корзины сейчас нулевая: деньги направлены в более сильные инструменты."; action = "Заявки здесь не нужны, пока перераспределение не вернёт долю.";
+    } else if (full && lane.weight > 0) {
+      badge = "набрано"; cls = "ok"; text = "Доля плана уже на счёте: " + moneyText(have) + " из " + moneyText(target) + "."; action = "Новых заявок по этой корзине не будет, пока план не изменится.";
+    } else if (last) {
+      badge = last.status || "заявка";
+      cls = /исполн|набран|выставл/.test(badge) ? "ok" : /закрыт|ждёт|пропущ/.test(badge) ? "wait" : "bad";
+      text = (last.why ? last.why + " " : "") + (last.detail || "");
+      action = last.action || "";
+    } else if (!autoOrders) {
+      badge = "нет разрешения"; text = "Нужно докупить " + moneyText(Math.max(0, target - have)) + ", но заявки запрещены."; action = "Включите «Разрешить заявки» и нажмите «Сделать шаг».";
+    } else if (!session.open) {
+      badge = "биржа закрыта"; text = "Нужно докупить " + moneyText(Math.max(0, target - have)) + ". " + session.text; action = "Оставьте стратегию запущенной. Шаг повторится, когда откроется основная сессия.";
+    } else {
+      badge = "к покупке"; text = "Скрипт докупит около " + moneyText(Math.max(0, target - have)) + " по рынку."; action = "Нажмите «Сделать шаг». Заявка идёт, потому что факт меньше плана.";
+    }
+    const width = target > 0 ? Math.max(0, Math.min(100, Math.round(have / target * 100))) : 0;
+    const names = lane.tickers.filter((ticker) => positions.some((item) => item.ticker === ticker)).map((ticker) => ticker + " " + moneyText(valueOf([ticker])));
+    return '<div class="lane"><div class="top"><h3>' + lane.name + '</h3><span class="badge ' + cls + '">' + badge + '</span></div><div class="bar"><span style="width:' + width + '%"></span></div><div class="muted">' + width + '% плана · ' + moneyText(have) + ' из ' + moneyText(target) + '. ' + lane.hint + '</div><div>' + text + '</div>' + (action ? '<div class="muted">Что сделать: ' + action + '</div>' : '') + (names.length ? '<div class="muted">Уже в корзине: ' + names.join(", ") + '</div>' : '') + '</div>';
+  });
+  const cash = account ? account.cash : 0;
+  blocks.push('<div class="lane"><div class="top"><h3>Рубли</h3><span class="badge ok">свободно</span></div><div>' + moneyText(cash) + ' — это не заявка, а валюта на счёте. Из неё скрипт набирает остальные корзины.</div></div>');
+  const stage = !active ? "Стратегия остановлена" : !session.open ? "Биржа закрыта" : lanes.every((lane) => lane.weight <= 0 || valueOf(lane.tickers) + 1000 >= total * lane.weight) ? "План набран" : stepping ? "Выставляю заявки" : "Можно набирать план";
+  document.querySelector("#stage").textContent = stage + ". " + session.text;
+  document.querySelector("#progress").innerHTML = blocks.join("");
+  const box = document.querySelector("#attempts");
+  if (box) box.innerHTML = attempts.length ? attempts.map((item) => '<div class="lane"><strong>' + esc(item.sleeve || item.title || "") + '</strong> · ' + esc(item.status || "") + '<div>' + esc(item.detail || "") + '</div><div class="muted">' + esc(item.action || "") + '</div></div>').join("") : '<div class="muted">Здесь появится разбор последнего шага: по какой корзине была заявка и почему биржа ответила именно так.</div>';
 }
 document.body.addEventListener("click", (event) => {
   const link = event.target.closest("[data-nav]");
@@ -618,7 +696,7 @@ async function step() {
     attempts = response.attempts || [];
     if (!attempts.length) attempts = [{ title: "Шаг", status: "пусто", detail: response.error || response.note || "брокер не вернул заявки" }];
     attempts.forEach((item) => record(`${item.title}: ${item.status}`));
-    toast(attempts.map((item) => item.status).join(", "));
+    toast("Шаг закончен. Разбор — в блоке «Ход стратегии».");
     await refresh(false);
   } catch (error) {
     toast(error.message || "Шаг не выполнен");

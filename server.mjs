@@ -316,10 +316,21 @@ async function rublePrice(token, host, match) {
   return nominal ? (points / 100) * nominal : points;
 }
 
+function explainFailure(text) {
+  const raw = String(text || "");
+  if (raw.includes("not available") || raw.includes("30079")) {
+    return { status: "биржа закрыта", detail: "Биржа не принимает заявку по этой бумаге.", action: "Если сейчас выходной, вечер или пауза между сессиями — оставьте стратегию запущенной. Основная сессия 10:00–18:50 мск. Вечером многие облигации не торгуются." };
+  }
+  if (raw.includes("Not enough") || raw.includes("30034") || raw.includes("не хватает")) {
+    return { status: "не хватает денег", detail: "Не хватило свободных рублей или гарантийного обеспечения.", action: "Держите в рублях запас под эту корзину или уменьшите её долю в плане." };
+  }
+  return { status: "отклонена", detail: raw.slice(0, 160), action: "Если отказ повторяется, уберите бумагу из стратегии и выберите другую ликвидную с тем же риском." };
+}
+
 async function trade(token, auto, sleeves, accountId) {
   const plan = Array.isArray(sleeves) ? sleeves.filter((item) => item && item.weight > 0 && item.orders?.length) : [];
   if (!auto) {
-    return { attempts: plan.map((item) => ({ title: item.name, ticker: "", status: "не отправлена", detail: `по плану ${(item.weight * 100).toFixed(0)}% счёта, нет разрешения на заявки` })) };
+    return { attempts: plan.map((item) => ({ sleeve: item.name, title: item.name, ticker: "", status: "нет разрешения", detail: `По плану ${(item.weight * 100).toFixed(0)}% счёта, заявка не отправлена.`, action: "Включите «Разрешить заявки без отдельного подтверждения» и повторите шаг." })) };
   }
   const cleaned = String(token || "").trim().replace(/^bearer\s+/i, "").replace(/\s+/g, "");
   const link = await contour(cleaned);
@@ -340,7 +351,7 @@ async function trade(token, auto, sleeves, accountId) {
     const have = sleeve.orders.reduce((sum, order) => sum + (owned.get(order.ticker) || 0), 0);
     let deficit = Math.min(Math.max(0, target - have), budget);
     if (deficit < 1000) {
-      attempts.push({ title: sleeve.name, ticker: "", status: "пропущена", detail: `доля ${Math.round(target)} ₽ уже набрана` });
+      attempts.push({ sleeve: sleeve.name, title: sleeve.name, ticker: "", status: "набрано", detail: `Уже ${Math.round(have).toLocaleString("ru-RU")} ₽ из ${Math.round(target).toLocaleString("ru-RU")} ₽.`, why: "Доля плана заполнена, докупать нечего.", action: "Ничего делать не нужно." });
       continue;
     }
     const parts = sleeve.orders.reduce((sum, order) => sum + (Number(order.part) || 1), 0) || sleeve.orders.length;
@@ -352,7 +363,7 @@ async function trade(token, auto, sleeves, accountId) {
         const { match, known } = await instrumentFor(cleaned, link.host, order.ticker, order.query);
         if (!match) {
           carry += share;
-          attempts.push({ title: order.title || sleeve.name, ticker: order.ticker, status: "недоступна", detail: known ? "брокер не даёт выставлять эту бумагу через API, доля перенесена" : "инструмент не найден" });
+          attempts.push({ sleeve: sleeve.name, title: order.title || sleeve.name, ticker: order.ticker, status: "недоступна", detail: known ? "Брокер не даёт выставлять эту бумагу через API." : "Инструмент не найден в Т-Банке.", why: `Нужно было докупить около ${Math.round(share).toLocaleString("ru-RU")} ₽ в «${sleeve.name}».`, action: known ? "Выберите другую ликвидную бумагу той же категории. Доля непропавшей бумаги переносится на следующую в корзине." : "Проверьте тикер на странице «Облигации»." });
           continue;
         }
         const price = await rublePrice(cleaned, link.host, match);
@@ -380,9 +391,8 @@ async function trade(token, auto, sleeves, accountId) {
         const status = String(posted.executionReportStatus || "");
         attempts.push({ title: order.title, ticker: order.ticker, status: status.includes("FILL") ? "исполнена" : "выставлена", detail: `покупка ${lots} лот. на ~${Math.round(spent).toLocaleString("ru-RU")} ₽, цель корзины ${Math.round(target).toLocaleString("ru-RU")} ₽` });
       } catch (error) {
-        const text = error instanceof Error ? error.message : "ошибка заявки";
-        const detail = text.includes("not available for trading") ? "биржа сейчас не принимает заявку" : text.includes("Not enough") ? "не хватает средств или маржи" : text.slice(0, 180);
-        attempts.push({ title: order.title || sleeve.name, ticker: order.ticker, status: "отклонена", detail });
+        const failure = explainFailure(error instanceof Error ? error.message : "ошибка заявки");
+        attempts.push({ sleeve: sleeve.name, title: order.title || sleeve.name, ticker: order.ticker, status: failure.status, detail: failure.detail, why: `Заявка была в корзину «${sleeve.name}», не хватало около ${Math.round(share).toLocaleString("ru-RU")} ₽ до плана.`, action: failure.action });
       }
     }
     if (sleeve.hedge && !shorted.has(sleeve.hedge.ticker)) {
@@ -404,11 +414,12 @@ async function trade(token, auto, sleeves, accountId) {
         }
       } catch (error) {
         const text = error instanceof Error ? error.message : "ошибка заявки";
-        attempts.push({ title: sleeve.hedge.title, ticker: sleeve.hedge.ticker, status: "отклонена", detail: text.includes("not available") ? "биржа сейчас не принимает фьючерс" : text.slice(0, 160) });
+        const failure = explainFailure(text);
+        attempts.push({ sleeve: sleeve.name, title: sleeve.hedge.title, ticker: sleeve.hedge.ticker, status: failure.status, detail: failure.detail, why: "Шорт нужен, чтобы валютная облигация была захеджирована.", action: failure.action });
       }
     }
   }
-  if (!attempts.length) attempts.push({ title: "Шаг", ticker: "", status: "пусто", detail: "в плане нет долей с выбранными бумагами" });
+  if (!attempts.length) attempts.push({ sleeve: "Стратегия", title: "Шаг", status: "нет поручений", detail: "Корзины для покупки не переданы.", action: "Если выбрано «Оставить в рублях», так и задумано. Иначе добавьте бумаги в нужную категорию." });
   return { attempts, sandbox: link.sandbox };
 }
 
