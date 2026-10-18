@@ -39,7 +39,11 @@
     .chips button { height: 28px; background: var(--bg); font-size: 12px; }
     svg { width: 96px; height: 96px; }
     .donut { display: flex; align-items: center; gap: 8px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    .ranges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .ranges label { display: grid; gap: 2px; color: var(--muted); font-size: 11px; }
+    .ranges input, .ranges select { width: 118px; height: 36px; background: var(--bg); }
+    th button { height: auto; padding: 8px 0; background: transparent; color: var(--muted); font-weight: 500; }
+    th button:hover { background: transparent; color: var(--ink); }
     th, td { text-align: left; padding: 8px; vertical-align: top; }
     th { color: var(--muted); font-weight: 500; }
     tr + tr td { border-top: 1px solid var(--line); }
@@ -84,9 +88,29 @@
       <input id="query" placeholder="Название или ISIN" />
       <span class="muted" id="count"></span>
     </div>
+    <div class="ranges">
+      <label>Доходность от<input id="ytmMin" inputmode="decimal" placeholder="%"></label>
+      <label>Доходность до<input id="ytmMax" inputmode="decimal" placeholder="%"></label>
+      <label>Купон от<input id="couponMin" inputmode="decimal" placeholder="%"></label>
+      <label>Выплаты<select id="payFilter"><option value="">все</option><option value="месяц">каждый месяц</option><option value="квартал">раз в квартал</option><option value="полгода">раз в полгода</option><option value="год">раз в год</option></select></label>
+      <label>Погашение до<input id="maturityMax" inputmode="numeric" placeholder="год"></label>
+      <label>Дюрация до<input id="durationMax" inputmode="decimal" placeholder="лет"></label>
+      <label>Цена от<input id="priceMin" inputmode="decimal" placeholder="%"></label>
+      <label>Оборот от<input id="turnoverMin" inputmode="decimal" placeholder="млн ₽"></label>
+    </div>
     <div class="scroll">
       <table>
-        <thead><tr><th>Бумага</th><th>К погашению</th><th>Купон</th><th>Выплаты</th><th>Погашение</th><th>Дюрация</th><th>Цена</th><th>Оборот</th><th></th></tr></thead>
+        <thead><tr>
+          <th><button type="button" data-sort="name" data-label="Бумага">Бумага</button></th>
+          <th><button type="button" data-sort="ytm" data-label="К погашению">К погашению</button></th>
+          <th><button type="button" data-sort="coupon" data-label="Купон">Купон</button></th>
+          <th><button type="button" data-sort="frequency" data-label="Выплаты">Выплаты</button></th>
+          <th><button type="button" data-sort="maturity" data-label="Погашение">Погашение</button></th>
+          <th><button type="button" data-sort="duration" data-label="Дюрация">Дюрация</button></th>
+          <th><button type="button" data-sort="price" data-label="Цена">Цена</button></th>
+          <th><button type="button" data-sort="turnover" data-label="Оборот">Оборот</button></th>
+          <th></th>
+        </tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
@@ -109,6 +133,15 @@ let board = null;
 let picks = JSON.parse(localStorage.getItem("carry-picks") || '{"rub":[],"usd":[],"cny":[]}');
 let filter = "ОФЗ";
 let risky = false;
+let sortKey = "ytm";
+let sortDir = -1;
+
+function field(id) {
+  const value = document.querySelector(id).value.trim().replace(",", ".");
+  if (!value) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>"]/g, (char) => char === "&" ? "\u0026amp;" : char === "<" ? "\u0026lt;" : char === ">" ? "\u0026gt;" : "\u0026quot;");
@@ -196,14 +229,39 @@ function draw() {
   ].join("");
   const labels = [["ОФЗ", "ОФЗ"], ["Корпоративная", "Корпоративные"], ["USD", "Доллар"], ["CNY", "Юань"]];
   document.querySelector("#filters").innerHTML = labels.map(([id, label]) => `<button class="${filter === id ? "on" : ""}" data-filter="${id}">${label}</button>`).join("") + `<button data-risk>${risky ? "Скрыть рискованные" : "Показать рискованные"}</button>`;
+  document.querySelectorAll("[data-sort]").forEach((button) => {
+    button.textContent = button.dataset.label + (button.dataset.sort === sortKey ? (sortDir < 0 ? " ↓" : " ↑") : "");
+  });
   const query = document.querySelector("#query").value.trim().toLowerCase();
+  const ytmMin = field("#ytmMin");
+  const ytmMax = field("#ytmMax");
+  const couponMin = field("#couponMin");
+  const pay = document.querySelector("#payFilter").value;
+  const maturityMax = field("#maturityMax");
+  const durationMax = field("#durationMax");
+  const priceMin = field("#priceMin");
+  const turnoverMin = field("#turnoverMin");
   const visible = (board?.bonds || []).filter((bond) => {
     if (!risky && bond.risk === "повышенный") return false;
     if (query && !`${bond.name} ${bond.secid}`.toLowerCase().includes(query)) return false;
+    if (ytmMin !== null && bond.ytm < ytmMin) return false;
+    if (ytmMax !== null && bond.ytm > ytmMax) return false;
+    if (couponMin !== null && (bond.coupon === null || bond.coupon < couponMin)) return false;
+    if (pay && !String(bond.frequency).includes(pay)) return false;
+    if (maturityMax !== null && (!bond.maturity || Number(String(bond.maturity).slice(0, 4)) > maturityMax)) return false;
+    if (durationMax !== null && (bond.durationDays === null || bond.durationDays / 365 > durationMax)) return false;
+    if (priceMin !== null && (bond.price === null || bond.price < priceMin)) return false;
+    if (turnoverMin !== null && bond.turnover < turnoverMin * 1e6) return false;
     if (filter === "ОФЗ") return bond.kind === "ОФЗ";
     if (filter === "Корпоративная") return bond.kind === "Корпоративная";
     if (filter === "USD") return bond.currency === "USD";
     return bond.currency === "CNY";
+  }).sort((a, b) => {
+    const pick = (bond) => sortKey === "name" ? bond.name : sortKey === "coupon" ? bond.coupon ?? -1 : sortKey === "frequency" ? bond.frequency : sortKey === "maturity" ? bond.maturity || "" : sortKey === "duration" ? bond.durationDays ?? -1 : sortKey === "price" ? bond.price ?? -1 : sortKey === "turnover" ? bond.turnover : bond.ytm;
+    const left = pick(a);
+    const right = pick(b);
+    const order = left > right ? 1 : left < right ? -1 : 0;
+    return order * sortDir;
   }).slice(0, 40);
   document.querySelector("#count").textContent = board ? `${visible.length} бумаг · ${new Date(board.updated).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}` : "";
   document.querySelector("#rows").innerHTML = visible.map((bond) => {
@@ -221,14 +279,22 @@ document.body.addEventListener("click", (event) => {
   }
   const filterButton = event.target.closest("[data-filter]");
   const riskButton = event.target.closest("[data-risk]");
+  const sortButton = event.target.closest("[data-sort]");
   const add = event.target.closest("[data-add]");
   const removeButton = event.target.closest("[data-remove]");
   if (filterButton) { filter = filterButton.dataset.filter; draw(); }
   if (riskButton) { risky = !risky; draw(); }
+  if (sortButton) {
+    const key = sortButton.dataset.sort;
+    if (sortKey === key) sortDir *= -1;
+    else { sortKey = key; sortDir = key === "name" || key === "maturity" || key === "frequency" ? 1 : -1; }
+    draw();
+  }
   if (add) { const [sleeveName, secid] = add.dataset.add.split(":"); choose(sleeveName, secid); }
   if (removeButton) { const [sleeveName, secid] = removeButton.dataset.remove.split(":"); remove(sleeveName, secid); }
 });
 document.querySelector("#query").addEventListener("input", draw);
+document.querySelectorAll(".ranges input, .ranges select").forEach((input) => input.addEventListener("input", draw));
 async function refresh(force) {
   document.querySelector("#refresh").textContent = "Обновляю…";
   document.querySelector("#note").textContent = "";
