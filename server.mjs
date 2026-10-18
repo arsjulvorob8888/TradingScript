@@ -514,6 +514,12 @@ createServer(async (req, res) => {
       res.end(JSON.stringify(withServer(payload)));
       return;
     }
+    if (req.method === "POST" && req.url === "/api/pulse") {
+      await tick();
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ ok: true, at: cache.at, active: memory.active, auto: memory.auto }));
+      return;
+    }
     const page = await readFile(join(ROOT, "public", "index.html"));
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
     res.end(page);

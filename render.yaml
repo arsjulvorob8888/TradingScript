@@ -9,3 +9,11 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
+  - type: cron
+    name: carry-pulse
+    runtime: node
+    plan: free
+    branch: main
+    schedule: "*/10 * * * *"
+    buildCommand: node -v
+    startCommand: node pulse.mjs
