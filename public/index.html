@@ -607,15 +607,16 @@ function renderCategory() {
     return false;
   };
   const held = positions.filter(belongs);
-  const heldHtml = held.length ? held.map((item) => { const shift = changeOf(item); return '<div class="prow"><div><strong>' + esc(item.name) + '</strong><div class="muted">' + esc(item.ticker) + ' · ' + item.quantity.toFixed(2) + (item.average ? ' · средняя ' + item.average.toFixed(2) : '') + '</div></div><div class="right"><strong>' + money(item.value) + '</strong><div class="' + (shift.pnl < 0 ? 'down' : 'up') + '">' + fineMoney(shift.pnl) + ' · ' + shift.pct.toFixed(2).replace('.', ',') + '%</div></div></div>'; }).join("") : '<div class="muted">Из этой категории на счёте пока ничего не куплено.</div>';
+  const heldHtml = openCategory === "Рубли" ? "" : held.length ? held.map((item) => { const shift = changeOf(item); return '<div class="prow"><div><strong>' + esc(item.name) + '</strong><div class="muted">' + esc(item.ticker) + ' · ' + item.quantity.toFixed(2) + (item.average ? ' · средняя ' + item.average.toFixed(2) : '') + '</div></div><div class="right"><strong>' + money(item.value) + '</strong><div class="' + (shift.pnl < 0 ? 'down' : 'up') + '">' + fineMoney(shift.pnl) + ' · ' + shift.pct.toFixed(2).replace('.', ',') + '%</div></div></div>'; }).join("") : '<div class="muted">Из этой категории на счёте пока ничего не куплено.</div>';
   let plan = "";
   if (openCategory === "Пары" && current) plan = "План: доллар " + Math.round(current.weights.usd * 100) + "%, юань " + Math.round(current.weights.cny * 100) + "%. Внутри пары облигация и шорт фьючерса. Сейчас доллар " + (current.usd == null ? "без бумаги" : current.usd.toFixed(1) + "%") + ", юань " + (current.cny == null ? "без бумаги" : current.cny.toFixed(1) + "%") + ".";
   if (openCategory === "Фонды" && board) plan = "План: LQDT " + Math.round((current?.weights.lqdt || 0) * 100) + "% при доходности " + board.lqdt.toFixed(1) + "%, TMON " + Math.round((current?.weights.tmon || 0) * 100) + "% при доходности " + board.tmon.toFixed(1) + "%.";
   if (openCategory === "Рублёвые облигации") plan = "План: " + Math.round((current?.weights.rub || 0) * 100) + "% счёта. " + (selected("rub").map((bond) => bond.name + " " + bond.ytm.toFixed(1) + "%").join(", ") || "Выпуск не выбран.");
-  if (openCategory === "Рубли") plan = "Свободные рубли не входят в заявки. Это резерв, из которого набираются остальные категории. Сейчас " + money(accountState?.account?.cash || 0) + ".";
+  if (openCategory === "Рубли") plan = "Свободные рубли не входят в заявки. Это резерв, из которого набираются остальные категории.";
+  const cashLine = openCategory === "Рубли" ? '<div class="balance">' + money(accountState?.account?.cash || 0) + '</div>' : "";
   const chosen = openCategory === "Пары" ? selected("usd").concat(selected("cny")) : openCategory === "Рублёвые облигации" ? selected("rub") : [];
   const chosenHtml = chosen.length ? '<div class="muted">В стратегии: ' + chosen.map((bond) => esc(bond.name) + " " + bond.ytm.toFixed(1) + "%").join(", ") + '</div>' : "";
-  box.innerHTML = '<div class="top"><h2>' + openCategory + '</h2><button type="button" id="closeCategory">Свернуть</button></div><p>' + plan + '</p>' + chosenHtml + heldHtml;
+  box.innerHTML = '<div class="top"><h2>' + openCategory + '</h2><button type="button" id="closeCategory">Свернуть</button></div>' + cashLine + '<p>' + plan + '</p>' + chosenHtml + heldHtml;
 }
 function sessionNow() {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Moscow", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
