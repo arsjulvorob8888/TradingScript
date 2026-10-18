@@ -33,6 +33,9 @@
     button:hover { background: var(--line); }
     button.on, button.add { background: var(--yellow); }
     button.on:hover, button.add:hover { background: var(--yellow-2); }
+    .stat { min-width: 188px; padding: 12px 16px; }
+    .stat .muted { white-space: nowrap; font-size: 13px; }
+    .stat strong { display: block; margin-top: 4px; font-size: 22px; }
     .stat.win { background: #e5f6ea; }
     .stat.lose { background: #fde8ea; }
     .down { color: var(--down); }
@@ -44,7 +47,8 @@
     .compare { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; }
     .compare strong { display: block; font-size: 18px; }
     .panel, .sleeve { background: var(--card); border-radius: 16px; padding: 12px; }
-    .sleeves { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    #strategy.sleeves { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .chip { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 10px; background: var(--bg); font-size: 12px; font-weight: 700; }
     .sleeve h2 { margin: 0; font-size: 14px; }
     .sleeve .value { font-size: 20px; font-weight: 700; }
     .top { display: flex; justify-content: space-between; align-items: baseline; }
@@ -177,7 +181,7 @@
     <header>
       <div class="muted kicker">СОСТАВ</div>
       <h1>Стратегия</h1>
-      <div class="muted">Три корзины. Если валютная пара слабее денежного рынка, её доля уходит в рублёвые облигации и фонды.</div>
+      <div class="muted">Рублёвые облигации, две валютные пары и денежный рынок. Если пара слабее фондов, её доля уходит в рублёвые облигации и фонды.</div>
     </header>
     <div class="sleeves" id="strategy"></div>
     <section class="panel">
@@ -345,6 +349,13 @@ function remove(sleeve, secid) {
   save();
   draw();
 }
+function fundCard(current) {
+  if (!board) return "";
+  const weight = current ? Math.round((current.weights.lqdt + current.weights.tmon) * 100) : 0;
+  const mix = (current?.weights.lqdt || 0) + (current?.weights.tmon || 0);
+  const value = mix ? (current.weights.lqdt * board.lqdt + current.weights.tmon * board.tmon) / mix : Math.max(board.lqdt, board.tmon);
+  return `<div class="sleeve"><div class="top"><h2>Денежный рынок</h2><div class="value">${value.toFixed(1)}%</div></div><div class="muted">LQDT и TMON, доля плана ${weight}%. Подушка, без валютного риска</div><div class="chips"><span class="chip">LQDT ${board.lqdt.toFixed(1)}%</span><span class="chip">TMON ${board.tmon.toFixed(1)}%</span></div></div>`;
+}
 function sleeve(title, value, bonds, hint, name) {
   const pair = name === "usd" || name === "cny" ? `<button data-pair="${name}">${excluded[name] ? "Вернуть пару" : "Исключить пару"}</button>` : "";
   return `<div class="sleeve"><div class="top"><h2>${title}</h2><div class="value">${excluded[name] ? "0%" : value === null ? "—" : value.toFixed(1) + "%"}</div></div><div class="muted">${excluded[name] ? "пара исключена, доля в рублёвых и фондах" : hint}</div><div class="chips">${bonds.map((bond) => `<button data-remove="${name}:${bond.secid}">${esc(bond.name)} ${bond.ytm.toFixed(1)}% ×</button>`).join("")}</div>${pair}</div>`;
@@ -422,6 +433,7 @@ function draw() {
     sleeve("Рублёвые", current?.rubYtm ?? null, rub, rub.length ? "доходность к погашению выбранных облигаций" : "облигации не выбраны, доходность не считается", "rub"),
     sleeve("Пара доллар", usd.length ? current?.usd ?? null : current?.fundingUsd ?? null, usd, usd.length ? "облигация плюс фандинг шорта, валюта хеджируется" : "облигация не выбрана. Доходность указана только с учётом средней доходности от фандинга и не учитывает валютные колебания", "usd"),
     sleeve("Пара юань", cny.length ? current?.cny ?? null : current?.fundingCny ?? null, cny, cny.length ? "облигация плюс фандинг шорта, валюта хеджируется" : "облигация не выбрана. Доходность указана только с учётом средней доходности от фандинга и не учитывает валютные колебания", "cny"),
+    fundCard(current),
   ].join("");
   const labels = [["ОФЗ", "ОФЗ"], ["Корпоративная", "Корпоративные"], ["USD", "Доллар"], ["CNY", "Юань"]];
   document.querySelector("#filters").innerHTML = labels.map(([id, label]) => `<button class="${filter === id ? "on" : ""}" data-filter="${id}">${label}</button>`).join("") + `<button data-risk>${risky ? "Скрыть рискованные" : "Показать рискованные"}</button>` + ((filter === "USD" || filter === "CNY") ? `<button data-pair="${filter === "USD" ? "usd" : "cny"}">${excluded[filter === "USD" ? "usd" : "cny"] ? "Вернуть пару" : "Исключить пару"}</button>` : "");
