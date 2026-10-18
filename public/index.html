@@ -315,7 +315,7 @@ function ring(id, parts) {
   node.setAttribute("viewBox", "0 0 100 100");
   node.innerHTML = `<circle cx="50" cy="50" r="30" stroke="#e6e8ec" stroke-width="12" fill="none"/>${arcs}`;
 }
-function save() { localStorage.setItem("carry-picks", JSON.stringify(picks)); }
+function save() { localStorage.setItem("carry-picks", JSON.stringify(picks)); syncState(); }
 function saveExcluded() { localStorage.setItem("carry-excluded", JSON.stringify(excluded)); }
 function choose(sleeve, secid) {
   const bond = (board?.bonds || []).find((item) => item.secid === secid);
@@ -580,13 +580,17 @@ async function step() {
   }
 }
 document.querySelectorAll(".ranges input, .ranges select").forEach((input) => input.addEventListener("input", draw));
+let seenDecision = "";
+function syncState() {
+  fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim(), accountId: localStorage.getItem("carry-account") || "", active, auto: autoOrders, sleeves: buildSleeves() }) }).catch(() => {});
+}
 async function refresh(force) {
   document.querySelector("#refresh").textContent = "Обновляю…";
   document.querySelector("#note").textContent = "";
   try {
     const [market, account] = await Promise.all([
       fetch("/api/bonds", { method: "POST" }).then((response) => response.json()),
-      fetch("/api/desk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim(), accountId: localStorage.getItem("carry-account") || "" }) }).then((response) => response.json()).catch(() => null),
+      fetch("/api/desk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim(), accountId: localStorage.getItem("carry-account") || "", force: Boolean(force) }) }).then((response) => response.json()).catch(() => null),
     ]);
     board = market;
     if (!picks.rub.length && !picks.usd.length && !picks.cny.length) {
@@ -596,8 +600,13 @@ async function refresh(force) {
     }
     if (account?.account) document.querySelector("#title").textContent = account.account.name;
     accountState = account;
+    if (account?.decision?.at && account.decision.at !== seenDecision) {
+      seenDecision = account.decision.at;
+      (account.decision.attempts || []).forEach((item) => record(`Сервер · ${item.title}: ${item.status}`));
+    }
     document.querySelector("#note").textContent = account?.note || account?.error || "";
     draw();
+    syncState();
   } catch (error) {
     document.querySelector("#note").textContent = error.message || "Нет связи с биржей";
   } finally {
@@ -614,6 +623,7 @@ document.querySelector("#toggle").addEventListener("click", () => {
   record(active ? "Стратегия запущена" : "Стратегия остановлена");
   toast(active ? "Стратегия запущена" : "Стратегия остановлена");
   draw();
+  syncState();
   if (active) step();
 });
 document.querySelector("#reinvest").addEventListener("change", (event) => {
@@ -621,18 +631,21 @@ document.querySelector("#reinvest").addEventListener("change", (event) => {
   localStorage.setItem("carry-reinvest", reinvest ? "1" : "0");
   document.querySelector("#reinvestTo").disabled = !reinvest;
   draw();
+  syncState();
 });
 document.querySelector("#reinvestTo").addEventListener("change", (event) => {
   reinvestTo = event.target.value;
   localStorage.setItem("carry-reinvest-to", reinvestTo);
   record("Реинвест: " + event.target.selectedOptions[0].textContent);
   draw();
+  syncState();
 });
 document.querySelector("#auto").addEventListener("change", (event) => {
   autoOrders = event.target.checked;
   localStorage.setItem("carry-auto", autoOrders ? "1" : "0");
   record(autoOrders ? "Автозаявки разрешены" : "Автозаявки выключены");
   draw();
+  syncState();
 });
 document.querySelector("#accountPick").addEventListener("change", (event) => {
   localStorage.setItem("carry-account", event.target.value);
@@ -651,6 +664,7 @@ function showPage() {
 window.addEventListener("popstate", showPage);
 showPage();
 refresh(false);
+setInterval(() => refresh(false), 3 * 60 * 1000);
 </script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -247,7 +247,7 @@ async function desk(token, accountId) {
   result.operations = await operations(cleaned, link, account.id);
   result.orders = await openOrders(cleaned, link, account.id);
   result.sandbox = link.sandbox;
-  result.note = link.sandbox ? "Подключена песочница. Шаг стратегии ставит рыночные заявки на 1 лот." : "Подключён боевой счёт. Шаг ставит рыночные заявки на 1 лот только с разрешением.";
+  result.note = link.sandbox ? "Подключена песочница." : "Подключён боевой счёт.";
   return result;
 }
 
@@ -413,30 +413,105 @@ async function trade(token, auto, sleeves, accountId) {
 }
 
 const port = Number(process.env.PORT || 8080);
+const STATE_PATH = join(ROOT, "data", "state.json");
+const EVERY = 10 * 60 * 1000;
+const memory = { token: "", accountId: "", active: false, auto: false, sleeves: [], updated: "" };
+const cache = { at: 0, bonds: null, deskKey: "", desk: null, decision: null };
+let ticking = false;
+
+async function loadState() {
+  try {
+    Object.assign(memory, JSON.parse(await readFile(STATE_PATH, "utf8")));
+  } catch { /* первый запуск */ }
+}
+
+async function storeState() {
+  await mkdir(join(ROOT, "data"), { recursive: true });
+  await writeFile(STATE_PATH, JSON.stringify({ token: memory.token, accountId: memory.accountId, active: memory.active, auto: memory.auto, sleeves: memory.sleeves, updated: memory.updated }));
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}")); }
+      catch (error) { reject(error); }
+    });
+    req.on("error", reject);
+  });
+}
+
+function withServer(payload) {
+  const when = cache.at ? new Date(cache.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "";
+  const mode = memory.active ? (memory.auto ? "Сервер сам обновляет счёт и добирает доли плана." : "Сервер сам обновляет счёт. Заявки выключены.") : "Сервер ждёт запуска стратегии.";
+  return { ...payload, serverAt: cache.at ? new Date(cache.at).toISOString() : "", decision: cache.decision, note: [payload?.note, when ? `${mode} Последнее обновление ${when}.` : mode].filter(Boolean).join(" ") };
+}
+
+async function tick() {
+  if (ticking) return;
+  ticking = true;
+  try {
+    cache.bonds = await listBonds(true);
+    if (memory.token) {
+      cache.desk = await desk(memory.token, memory.accountId);
+      cache.deskKey = `${memory.token}:${memory.accountId || ""}`;
+      if (memory.active && memory.auto && memory.sleeves.length) {
+        const decision = await trade(memory.token, true, memory.sleeves, memory.accountId);
+        cache.decision = { at: new Date().toISOString(), attempts: decision.attempts || [] };
+        cache.desk = await desk(memory.token, memory.accountId);
+      }
+    }
+    cache.at = Date.now();
+    memory.updated = new Date(cache.at).toISOString();
+    await storeState();
+  } catch (error) {
+    cache.decision = { at: new Date().toISOString(), attempts: [{ title: "Сервер", status: "ошибка", detail: error instanceof Error ? error.message : "сбой обновления" }] };
+  } finally {
+    ticking = false;
+  }
+}
+
 createServer(async (req, res) => {
   try {
-    if (req.method === "POST" && req.url === "/api/bonds") {
-      const payload = JSON.stringify(await listBonds(true));
+    if (req.method === "POST" && req.url === "/api/state") {
+      const body = await readBody(req);
+      memory.token = String(body.token || memory.token || "").trim();
+      memory.accountId = String(body.accountId || "");
+      memory.active = Boolean(body.active);
+      memory.auto = Boolean(body.auto);
+      memory.sleeves = Array.isArray(body.sleeves) ? body.sleeves : [];
+      memory.updated = new Date().toISOString();
+      await storeState();
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(payload);
+      res.end(JSON.stringify({ ok: true, everyMinutes: 10 }));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/bonds") {
+      if (!cache.bonds || Date.now() - cache.at > EVERY) cache.bonds = await listBonds(true);
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(cache.bonds));
       return;
     }
     if (req.method === "POST" && req.url === "/api/step") {
-      const chunks = [];
-      for await (const chunk of req) chunks.push(chunk);
-      const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+      const body = await readBody(req);
       const payload = JSON.stringify(await trade(body.token, Boolean(body.auto), body.sleeves, body.accountId));
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       res.end(payload);
       return;
     }
     if (req.method === "POST" && req.url === "/api/desk") {
-      const chunks = [];
-      for await (const chunk of req) chunks.push(chunk);
-      const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
-      const payload = JSON.stringify(await desk(body.token, body.accountId));
+      const body = await readBody(req);
+      const key = `${body.token || ""}:${body.accountId || ""}`;
+      const fresh = cache.desk && cache.deskKey === key && Date.now() - cache.at < EVERY;
+      const payload = fresh && !body.force ? cache.desk : await desk(body.token, body.accountId);
+      if (!fresh || body.force) {
+        cache.desk = payload;
+        cache.deskKey = key;
+        cache.at = Date.now();
+      }
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(payload);
+      res.end(JSON.stringify(withServer(payload)));
       return;
     }
     const page = await readFile(join(ROOT, "public", "index.html"));
@@ -448,4 +523,6 @@ createServer(async (req, res) => {
   }
 }).listen(port, "0.0.0.0", () => {
   console.log(`carry desk http://0.0.0.0:${port}`);
+  loadState().then(() => tick());
+  setInterval(tick, EVERY);
 });
