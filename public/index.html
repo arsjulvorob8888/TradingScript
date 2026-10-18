@@ -407,7 +407,7 @@ function draw() {
   const held = accountState?.account?.positions || [];
   const factBuckets = { "Пары": 0, "Фонды": 0, "Рублёвые": 0 };
   held.forEach((item) => {
-    const name = item.group === "Облигации" ? "Рублёвые" : item.group;
+    const name = item.group === "Фонды" ? "Фонды" : item.group === "Пары" || item.group.includes("Доллар") || item.group.includes("Юан") || item.group.includes("Евро") ? "Пары" : item.group.includes("облигац") || item.group === "Облигации" ? "Рублёвые" : "";
     if (factBuckets[name] !== undefined) factBuckets[name] += item.value;
   });
   const factBase = accountState?.account?.total || factBuckets["Пары"] + factBuckets["Фонды"] + factBuckets["Рублёвые"] || 1;

@@ -158,13 +158,18 @@ async function contour(token) {
   throw new Error(last);
 }
 
-function groupOf(ticker, kind) {
-  const name = ticker.toUpperCase();
-  const type = kind.toLowerCase();
+function groupOf(ticker, kind, title = "") {
+  const name = String(ticker || "").toUpperCase();
+  const type = String(kind || "").toLowerCase();
+  const text = `${name} ${title}`.toUpperCase();
   if (name.endsWith("UTSTOM")) return "Деньги";
   if (name === "LQDT" || name === "TMON" || type.includes("etf")) return "Фонды";
   if (name === "USDRUBF" || name === "CNYRUBF" || type.includes("future")) return "Пары";
-  return "Облигации";
+  if (type.includes("share") || type.includes("stock")) return "Акции";
+  if (text.includes("CNY") || text.includes("ЮАН")) return "Юаневые облигации";
+  if (text.includes("USD") || text.includes("ДОЛЛ")) return "Долларовые облигации";
+  if (text.includes("EUR") || text.includes("ЕВРО")) return "Евровые облигации";
+  return "Рублёвые облигации";
 }
 
 async function desk(token, accountId) {
@@ -198,7 +203,7 @@ async function desk(token, accountId) {
     return {
       name: item.name || item.ticker || "Позиция",
       ticker: item.ticker || "",
-      group: groupOf(item.ticker || "", item.instrumentType || ""),
+      group: groupOf(item.ticker || "", item.instrumentType || "", item.name || ""),
       quantity,
       price,
       average: money(item.averagePositionPrice),
