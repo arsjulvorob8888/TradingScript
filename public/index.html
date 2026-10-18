@@ -88,12 +88,12 @@
     .scroll { overflow-x: auto; }
     .token { flex: 1; }
     #status { margin: 0; font-size: 22px; }
-    #toast.show { opacity: 1; }
     .control { display: grid; grid-template-columns: 1.4fr .8fr; gap: 12px; }
     .check { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
     #reinvestTo { height: 36px; border-radius: 10px; background: var(--bg); }
     .check input { width: auto; min-width: 0; height: auto; }
     #log div + div { margin-top: 6px; }
+    #log div:first-child { font-weight: 700; }
     @media (max-width: 800px) { .control { display: block; } .control .panel + .panel { margin-top: 8px; } }
   </style>
 </head>
@@ -150,7 +150,7 @@
       <button type="button" data-step>Сделать шаг</button>
     </div>
     <div class="panel">
-      <div class="muted">Журнал</div>
+      <div class="muted">Журнал действий</div>
       <div id="log"></div>
     </div>
   </section>
@@ -240,7 +240,6 @@
       </table></div>
     </section>
   </section>
-<div id="toast"></div>
 </main>
 <script>
 const SANDBOX = "t.FYCrHI6u8UGEs6RhUrpV0ixAVRFCJg0IowCXxQ7uOQdNwgSsO5o42B9hhvN9UxtVkVZPj9FYgZOJVvAcWRN5OA";
@@ -261,19 +260,10 @@ let autoOrders = localStorage.getItem("carry-auto") === "1";
 let reinvest = localStorage.getItem("carry-reinvest") !== "0";
 let reinvestTo = localStorage.getItem("carry-reinvest-to") || "best";
 let log = JSON.parse(localStorage.getItem("carry-log") || "[]");
-let toastTimer;
-
-function toast(text) {
-  const node = document.querySelector("#toast");
-  node.textContent = text;
-  node.classList.add("show");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => node.classList.remove("show"), 2600);
-}
 function record(text) {
   const time = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
   log.unshift({ time, text });
-  log = log.slice(0, 6);
+  log = log.slice(0, 12);
   localStorage.setItem("carry-log", JSON.stringify(log));
 }
 function sleeveName(sleeve) {
@@ -388,14 +378,12 @@ function choose(sleeve, secid) {
   if (picks[sleeve].includes(secid)) {
     remove(sleeve, secid);
     record(name + " исключена из стратегии");
-    toast(name + " исключена из стратегии");
     return;
   }
   if (excluded[sleeve]) { excluded[sleeve] = false; saveExcluded(); }
   picks[sleeve].push(secid);
   save();
   record(name + " добавлена в " + where);
-  toast(name + " добавлена в " + where);
   draw();
 }
 function excludePair(sleeve) {
@@ -404,8 +392,7 @@ function excludePair(sleeve) {
   if (excluded[sleeve]) picks[sleeve] = [];
   save();
   saveExcluded();
-  record(excluded[sleeve] ? title + " исключена" : title + " возвращена");
-  toast(excluded[sleeve] ? title + " исключена. Доля ушла в рублёвые и фонды" : title + " снова в стратегии");
+  record(excluded[sleeve] ? title + " исключена. Доля ушла в рублёвые и фонды" : title + " снова в стратегии");
   draw();
 }
 function remove(sleeve, secid) {
@@ -721,7 +708,7 @@ document.body.addEventListener("click", (event) => {
     draw();
   }
   if (add) { const [name, secid] = add.dataset.add.split(":"); choose(name, secid); }
-  if (removeButton) { const [name, secid] = removeButton.dataset.remove.split(":"); remove(name, secid); toast("Бумага исключена из стратегии"); }
+  if (removeButton) { const [name, secid] = removeButton.dataset.remove.split(":"); remove(name, secid); record("Бумага исключена из стратегии"); draw(); }
   const opener = event.target.closest("[data-open]");
   if (opener) { openCategory = openCategory === opener.dataset.open ? "" : opener.dataset.open; draw(); }
   if (event.target.closest("#closeCategory")) { openCategory = ""; draw(); }
@@ -747,7 +734,7 @@ function buildSleeves() {
 }
 async function step() {
   if (stepping) return;
-  if (!active) { toast("Сначала запустите стратегию"); return; }
+  if (!active) { record("Шаг не сделан: сначала запустите стратегию"); draw(); return; }
   stepping = true;
   document.querySelectorAll("[data-step]").forEach((button) => { button.textContent = "Выставляю…"; });
   try {
@@ -755,10 +742,9 @@ async function step() {
     attempts = response.attempts || [];
     if (!attempts.length) attempts = [{ title: "Шаг", status: "пусто", detail: response.error || response.note || "брокер не вернул заявки" }];
     attempts.forEach((item) => record(`${item.title}: ${item.status}`));
-    toast("Шаг закончен. Разбор — в блоке «Ход стратегии».");
     await refresh(false);
   } catch (error) {
-    toast(error.message || "Шаг не выполнен");
+    record(error.message || "Шаг не выполнен");
   } finally {
     stepping = false;
     document.querySelectorAll("[data-step]").forEach((button) => { button.textContent = "Сделать шаг"; });
@@ -807,7 +793,6 @@ document.querySelector("#toggle").addEventListener("click", () => {
   active = !active;
   localStorage.setItem("carry-active", active ? "1" : "0");
   record(active ? "Стратегия запущена" : "Стратегия остановлена");
-  toast(active ? "Стратегия запущена" : "Стратегия остановлена");
   draw();
   syncState();
   if (active) step();
