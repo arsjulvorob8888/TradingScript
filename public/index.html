@@ -28,6 +28,7 @@
     button.on, button.add { background: var(--yellow); }
     button.on:hover, button.add:hover { background: var(--yellow-2); }
     .stat.win { background: #e5f6ea; }
+    .stat.lose { background: #fde8ea; }
     .down { color: var(--down); }
     .up { color: #178a34; }
     .split { display: grid; grid-template-columns: minmax(280px, 340px) 1fr; gap: 12px; }
@@ -273,9 +274,14 @@ function draw() {
   document.querySelector("#forecast").textContent = current ? current.forecast.toFixed(1) + "%" : "—";
   const beatsKey = current ? current.forecast > 14 : false;
   const beatsCredit = current ? current.forecast > 30.12 : false;
-  document.querySelector("#forecastCard").classList.toggle("win", beatsKey && beatsCredit);
-  document.querySelector("#keyCard").classList.toggle("win", beatsKey);
-  document.querySelector("#creditCard").classList.toggle("win", beatsCredit);
+  const mark = (id, win, lose) => {
+    const node = document.querySelector(id);
+    node.classList.toggle("win", win);
+    node.classList.toggle("lose", lose);
+  };
+  mark("#forecastCard", beatsKey && beatsCredit, Boolean(current) && (!beatsKey || !beatsCredit));
+  mark("#keyCard", beatsKey, Boolean(current) && !beatsKey);
+  mark("#creditCard", beatsCredit, Boolean(current) && !beatsCredit);
   document.querySelector("#status").textContent = active ? "Работает" : "Остановлена";
   document.querySelector("#subtitle").textContent = active ? "Стратегия запущена и следит за доходностью корзин" : "Стратегия остановлена. Запуск — жёлтой кнопкой";
   const toggle = document.querySelector("#toggle");
