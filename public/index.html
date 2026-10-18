@@ -250,20 +250,26 @@ function model() {
   const rubBonds = selected("rub");
   const usdBonds = selected("usd");
   const cnyBonds = selected("cny");
-  const rubYtm = avg(rubBonds) ?? 13.2;
+  const rubYtm = avg(rubBonds);
   const usdAvg = avg(usdBonds);
   const cnyAvg = avg(cnyBonds);
-  const usd = usdAvg === null ? 10.9 : carry(usdAvg, board.fundingUsd, usdBonds[0]?.price ?? 100);
-  const cny = cnyAvg === null ? 14.2 : carry(cnyAvg, board.fundingCny, cnyBonds[0]?.price ?? 100);
+  const usd = usdAvg === null ? null : carry(usdAvg, board.fundingUsd, usdBonds[0]?.price ?? 100);
+  const cny = cnyAvg === null ? null : carry(cnyAvg, board.fundingCny, cnyBonds[0]?.price ?? 100);
   const hurdle = Math.max(board.lqdt, board.tmon);
   const weights = { usd: 0.4, cny: 0.2, rub: 0.25, lqdt: 0.1, tmon: 0.05 };
-  const release = (key) => { const cut = weights[key]; weights[key] = 0; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; };
-  if (excluded.usd) release("usd");
+  const release = (key) => {
+    const cut = weights[key];
+    weights[key] = 0;
+    if (key !== "rub" && rubYtm !== null) { weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
+    else weights.lqdt += cut;
+  };
+  if (excluded.usd || usd === null) release("usd");
   else if (usd < hurdle) { const cut = weights.usd * 0.5; weights.usd -= cut; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
-  if (excluded.cny) release("cny");
+  if (excluded.cny || cny === null) release("cny");
   else if (cny < hurdle) { const cut = weights.cny * 0.5; weights.cny -= cut; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
-  const forecast = weights.usd * usd + weights.cny * cny + weights.rub * rubYtm + weights.lqdt * board.lqdt + weights.tmon * board.tmon;
-  return { rubYtm, usd, cny, weights, forecast };
+  if (rubYtm === null) release("rub");
+  const forecast = weights.usd * (usd || 0) + weights.cny * (cny || 0) + weights.rub * (rubYtm || 0) + weights.lqdt * board.lqdt + weights.tmon * board.tmon;
+  return { rubYtm, usd, cny, fundingUsd: board.fundingUsd, fundingCny: board.fundingCny, weights, forecast };
 }
 function ring(parts) {
   const data = parts.length ? parts : [{ name: "Пусто", value: 1, color: "#e6e8ec" }];
@@ -343,7 +349,13 @@ function draw() {
   const toggle = document.querySelector("#toggle");
   toggle.textContent = active ? "Остановить" : "Запустить стратегию";
   toggle.classList.toggle("add", !active);
-  const best = !current ? "рублёвые облигации" : current.usd >= current.cny && current.usd >= current.rubYtm ? "пару доллар" : current.cny >= current.rubYtm ? "пару юань" : "рублёвые облигации";
+  const choices = [
+    current?.rubYtm != null ? ["рублёвые облигации", current.rubYtm] : null,
+    current?.usd != null ? ["пару доллар", current.usd] : null,
+    current?.cny != null ? ["пару юань", current.cny] : null,
+    ["фонды", Math.max(board?.lqdt || 0, board?.tmon || 0)],
+  ].filter(Boolean).sort((a, b) => b[1] - a[1]);
+  const best = choices[0][0];
   document.querySelector("#next").textContent = active
     ? (reinvest ? "Купоны и фандинг направляются в " + best + ". " : "Реинвестирование выключено. ") + (autoOrders ? "Разрешение на заявки включено. Нажмите «Сделать шаг»." : "Заявки не отправляются, пока нет разрешения.")
     : "Пока стратегия остановлена, бумаги только попадают в план.";
@@ -361,9 +373,9 @@ function draw() {
   const cny = selected("cny");
   document.querySelector("#sleeves").innerHTML = groups.map((item) => `<div class="sleeve"><div class="top"><h2>${item.name}</h2><div class="value">${item.value}%</div></div></div>`).join("");
   document.querySelector("#strategy").innerHTML = [
-    sleeve("Рублёвые", current ? current.rubYtm : null, rub, "доходность к погашению", "rub"),
-    sleeve("Пара доллар", current ? current.usd : null, usd, usd.length ? "облигация плюс шорт фьючерса" : "не выбрана, в расчёте 10,9%", "usd"),
-    sleeve("Пара юань", current ? current.cny : null, cny, cny.length ? "облигация плюс шорт фьючерса" : "не выбрана, в расчёте 14,2%", "cny"),
+    sleeve("Рублёвые", current?.rubYtm ?? null, rub, rub.length ? "доходность к погашению выбранных облигаций" : "облигации не выбраны, доходность не считается", "rub"),
+    sleeve("Пара доллар", usd.length ? current?.usd ?? null : current?.fundingUsd ?? null, usd, usd.length ? "облигация плюс фандинг шорта, валюта хеджируется" : "облигация не выбрана. Доходность указана только с учётом средней доходности от фандинга и не учитывает валютные колебания", "usd"),
+    sleeve("Пара юань", cny.length ? current?.cny ?? null : current?.fundingCny ?? null, cny, cny.length ? "облигация плюс фандинг шорта, валюта хеджируется" : "облигация не выбрана. Доходность указана только с учётом средней доходности от фандинга и не учитывает валютные колебания", "cny"),
   ].join("");
   const labels = [["ОФЗ", "ОФЗ"], ["Корпоративная", "Корпоративные"], ["USD", "Доллар"], ["CNY", "Юань"]];
   document.querySelector("#filters").innerHTML = labels.map(([id, label]) => `<button class="${filter === id ? "on" : ""}" data-filter="${id}">${label}</button>`).join("") + `<button data-risk>${risky ? "Скрыть рискованные" : "Показать рискованные"}</button>` + ((filter === "USD" || filter === "CNY") ? `<button data-pair="${filter === "USD" ? "usd" : "cny"}">${excluded[filter === "USD" ? "usd" : "cny"] ? "Вернуть пару" : "Исключить пару"}</button>` : "");
