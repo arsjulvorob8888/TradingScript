@@ -301,6 +301,9 @@ function selected(sleeve) {
   const map = new Map((board?.bonds || []).map((bond) => [bond.secid, bond]));
   return picks[sleeve].map((id) => map.get(id)).filter(Boolean);
 }
+function positionHeld(tickers) {
+  return (accountState?.account?.positions || []).some((item) => tickers.includes(item.ticker) && Math.abs(item.value) > 1000);
+}
 function model() {
   if (!board) return null;
   const rubBonds = selected("rub");
@@ -320,9 +323,9 @@ function model() {
     else weights.lqdt += cut;
   };
   if (excluded.usd || usd === null) release("usd");
-  else if (usd < hurdle) { const cut = weights.usd * 0.5; weights.usd -= cut; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
+  else if (positionHeld(usdBonds.map((bond) => bond.secid).concat("USDRUBF")) && usd < hurdle - 3) { const cut = weights.usd * 0.5; weights.usd -= cut; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
   if (excluded.cny || cny === null) release("cny");
-  else if (cny < hurdle) { const cut = weights.cny * 0.5; weights.cny -= cut; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
+  else if (positionHeld(cnyBonds.map((bond) => bond.secid).concat("CNYRUBF")) && cny < hurdle - 3) { const cut = weights.cny * 0.5; weights.cny -= cut; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
   if (rubYtm === null) release("rub");
   const forecast = weights.usd * (usd || 0) + weights.cny * (cny || 0) + weights.rub * (rubYtm || 0) + weights.lqdt * board.lqdt + weights.tmon * board.tmon;
   return { rubYtm, usd, cny, fundingUsd: board.fundingUsd, fundingCny: board.fundingCny, weights, forecast };
@@ -345,23 +348,18 @@ function ring(id, parts) {
   node.setAttribute("viewBox", "0 0 100 100");
   node.innerHTML = `<circle cx="50" cy="50" r="30" stroke="#e6e8ec" stroke-width="12" fill="none"/>${arcs}`;
 }
-function pairShape(title, move, yieldValue, baseWeight, weight) {
-  const hurdle = Math.max(board?.lqdt || 0, board?.tmon || 0);
-  const anomaly = yieldValue != null && yieldValue < hurdle;
-  const strong = Math.abs(move) >= 3;
-  const extreme = Math.abs(move) >= 8;
+function pairShape(title, move) {
+  const tickers = title === "Доллар" ? selected("usd").map((bond) => bond.secid).concat("USDRUBF") : selected("cny").map((bond) => bond.secid).concat("CNYRUBF");
+  const held = positionHeld(tickers);
+  const strong = held && Math.abs(move) >= 5;
   let bond = 50;
   if (strong) {
-    const tilt = Math.min(extreme ? 25 : 15, Math.round(Math.abs(move)));
+    const tilt = Math.min(25, Math.round(Math.abs(move)));
     bond = move < 0 ? 50 + tilt : 50 - tilt;
   }
-  const cut = weight < baseWeight - 0.01;
-  const active = strong || extreme || anomaly || cut;
-  const moveText = `${move > 0 ? "+" : ""}${move.toFixed(1)}% за 20 сессий`;
-  const reason = strong
-    ? (move < 0 ? "валюта подешевела — больше облигаций" : "валюта подорожала — больше шорт")
-    : anomaly || cut ? "доходность слабая — доля пары урезана" : "ровно: облигация и шорт";
-  return { title, bond, short: 100 - bond, active, moveText, reason };
+  const moveText = held ? `${move > 0 ? "+" : ""}${move.toFixed(1)}% за 3 месяца` : "позиция не куплена, цену не ведём";
+  const reason = !held ? "ровно 50/50, перераспределение выключено" : strong ? (move < 0 ? "валюта подешевела больше чем на 5% — больше облигаций" : "валюта подорожала больше чем на 5% — больше шорт") : "ровно: за 3 месяца нет движения от 5%";
+  return { title, bond, short: 100 - bond, active: strong, moveText, reason };
 }
 function save() { localStorage.setItem("carry-picks", JSON.stringify(picks)); syncState(); }
 function saveExcluded() { localStorage.setItem("carry-excluded", JSON.stringify(excluded)); }
@@ -484,8 +482,8 @@ function draw() {
     return '<button type="button" class="sleeve' + (openCategory === name ? " open" : "") + '" data-open="' + name + '"><h2>' + name + '</h2><div class="compare"><div><span class="muted">План</span><strong>' + plan + '%</strong></div><div><span class="muted">Факт</span><strong>' + fact + '%</strong></div></div><div class="muted">' + hints[name] + '</div></button>';
   }).join("");
   const mixes = [
-    pairShape("Доллар", board?.usdMove || 0, current?.usd ?? null, 0.4, current?.weights.usd ?? 0),
-    pairShape("Юань", board?.cnyMove || 0, current?.cny ?? null, 0.2, current?.weights.cny ?? 0),
+    pairShape("Доллар", board?.usdMove || 0),
+    pairShape("Юань", board?.cnyMove || 0),
   ];
   document.querySelector("#pairMix").innerHTML = mixes.map((item, index) => `<div class="pair-card"><svg id="mix${index}"></svg><h3>${item.title}</h3><div class="${item.active ? "shift" : "muted"}">${item.active ? "Перераспределение" : "Ровно"}</div><div class="muted">${item.bond}% облигация · ${item.short}% шорт</div><div class="muted">${item.moveText}. ${item.reason}</div></div>`).join("");
   mixes.forEach((item, index) => ring("#mix" + index, [{ name: "Облигация", value: item.bond }, { name: "Шорт", value: item.short }]));

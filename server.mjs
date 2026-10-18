@@ -99,16 +99,7 @@ async function market() {
 function planFrom(marketData) {
   const usd = netCarry(marketData.usdYtm, marketData.usdFunding, marketData.usdPrice);
   const cny = netCarry(marketData.cnyYtm, marketData.cnyFunding, marketData.cnyPrice);
-  const hurdle = Math.max(marketData.lqdt, marketData.tmon);
   const weights = { usd: 0.4, cny: 0.2, rub: 0.25, lqdt: 0.1, tmon: 0.05 };
-  for (const key of ["usd", "cny"]) {
-    if ((key === "usd" ? usd : cny) < hurdle) {
-      const cut = weights[key] * 0.5;
-      weights[key] -= cut;
-      weights.rub += cut * 0.6;
-      weights.lqdt += cut * 0.4;
-    }
-  }
   const forecast = weights.usd * usd + weights.cny * cny + weights.rub * marketData.ofz + weights.lqdt * marketData.lqdt + weights.tmon * marketData.tmon;
   return {
     forecast: round1(forecast),

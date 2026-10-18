@@ -131,13 +131,13 @@ async function enrich(bonds, board) {
 async function priceMove(ticker) {
   const payload = JSON.parse(
     await http(
-      `https://iss.moex.com/iss/history/engines/futures/markets/forts/securities/${ticker}.json?from=2026-09-01&iss.meta=off&history.columns=TRADEDATE,SETTLEPRICE`,
+      `https://iss.moex.com/iss/history/engines/futures/markets/forts/securities/${ticker}.json?from=2026-07-01&iss.meta=off&history.columns=TRADEDATE,SETTLEPRICE`,
     ),
   );
   const prices = (payload.history?.data || []).map((row) => Number(row[1])).filter((price) => price > 0);
-  if (prices.length < 6) return 0;
+  if (prices.length < 40) return 0;
   const last = prices[prices.length - 1];
-  const base = prices[Math.max(0, prices.length - 21)];
+  const base = prices[Math.max(0, prices.length - 60)];
   return Math.round((last / base - 1) * 1000) / 10;
 }
 
