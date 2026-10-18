@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: carry-desk
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: node -v
+    startCommand: node server.mjs
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
