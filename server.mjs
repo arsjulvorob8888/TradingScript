@@ -188,19 +188,22 @@ async function desk(token, accountId) {
   const positions = (portfolio.positions || []).map((item) => {
     const quantity = money(item.quantity);
     const price = money(item.currentPrice);
+    const average = money(item.averagePositionPrice);
     const value = Math.abs(price * quantity);
-    const pnl = money(item.expectedYield);
-    const base = value - pnl;
+    const brokerPnl = money(item.expectedYield);
+    const pricePnl = average ? (price - average) * quantity : 0;
+    const pnl = brokerPnl !== 0 ? brokerPnl : pricePnl;
+    const cost = average ? Math.abs(average * quantity) : Math.abs(value - pnl);
     return {
       name: item.name || item.ticker || "Позиция",
       ticker: item.ticker || "",
       group: groupOf(item.ticker || "", item.instrumentType || "", item.name || ""),
       quantity,
       price,
-      average: money(item.averagePositionPrice),
+      average,
       value,
       pnl,
-      pnlPercent: base > 0 ? (pnl / base) * 100 : 0,
+      pnlPercent: cost > 0 ? (pnl / cost) * 100 : 0,
     };
   }).filter((item) => item.value > 0 || item.quantity !== 0);
   const cashOnAccount = money(portfolio.totalAmountCurrencies);
@@ -219,7 +222,7 @@ async function desk(token, accountId) {
     bonds: money(portfolio.totalAmountBonds),
     etf: money(portfolio.totalAmountEtf),
     futures,
-    yield: money(portfolio.expectedYield),
+    yield: money(portfolio.expectedYield) || traded.reduce((sum, item) => sum + item.pnl, 0),
     positions: traded,
   };
   result.accounts = [];

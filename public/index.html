@@ -304,6 +304,21 @@ function selected(sleeve) {
   const map = new Map((board?.bonds || []).map((bond) => [bond.secid, bond]));
   return picks[sleeve].map((id) => map.get(id)).filter(Boolean);
 }
+function changeOf(item) {
+  const broker = Number(item.pnl) || 0;
+  if (broker) return { pnl: broker, pct: Number(item.pnlPercent) || 0 };
+  const average = Number(item.average) || 0;
+  const price = Number(item.price) || 0;
+  const quantity = Number(item.quantity) || 0;
+  if (!average || !quantity) return { pnl: 0, pct: 0 };
+  const pnl = (price - average) * quantity;
+  return { pnl, pct: (pnl / Math.abs(average * quantity)) * 100 };
+}
+function fineMoney(value) {
+  const number = Number(value) || 0;
+  const text = Math.abs(number) >= 100 ? Math.round(number).toLocaleString("ru-RU") : number.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (number > 0 ? "+" : "") + text + " ₽";
+}
 function positionHeld(tickers) {
   return (accountState?.account?.positions || []).some((item) => tickers.includes(item.ticker) && Math.abs(item.value) > 1000);
 }
@@ -548,10 +563,13 @@ function draw() {
   document.querySelector("#balanceTotal").textContent = account ? moneyText(account.total) : "—";
   const yieldNode = document.querySelector("#balanceYield");
   if (account) {
-    const base = account.total - account.yield;
-    const pct = base > 0 ? (account.yield / base) * 100 : 0;
-    yieldNode.textContent = `${account.yield > 0 ? "+" : ""}${moneyText(account.yield)} (${pct.toFixed(2).replace(".", ",")}%) за всё время`;
-    yieldNode.className = "yield " + (account.yield < 0 ? "down" : "up");
+    const rows = account.positions || [];
+    const live = rows.reduce((sum, item) => sum + changeOf(item).pnl, 0);
+    const shown = account.yield || live;
+    const invested = rows.reduce((sum, item) => sum + Math.abs((item.average || item.price || 0) * item.quantity), 0) || Math.abs(account.total - shown);
+    const pct = invested ? (shown / invested) * 100 : 0;
+    yieldNode.textContent = `${fineMoney(shown)} (${pct.toFixed(2).replace(".", ",")}%) за всё время`;
+    yieldNode.className = "yield " + (shown < 0 ? "down" : "up");
   } else {
     yieldNode.textContent = "—";
     yieldNode.className = "yield";
@@ -575,7 +593,7 @@ function draw() {
     return (value < 0 ? "шорт " : "") + text + " шт";
   };
   const purchases = positions.filter((item) => item.group !== "Деньги" && !String(item.ticker || "").endsWith("UTSTOM"));
-  document.querySelector("#accountList").innerHTML = (purchases.map((item) => `<div class="prow"><div><strong>${esc(item.name)}</strong><div class="muted">${esc(item.ticker)} · ${esc(item.group)} · ${qtyText(item.quantity)}${item.average ? " · средняя " + item.average.toFixed(2) : ""}</div></div><div class="right"><strong>${moneyText(item.value)}</strong><div class="${item.pnl < 0 ? "down" : "up"}">${(item.pnl > 0 ? "+" : "") + moneyText(item.pnl)} · ${(item.pnlPercent || 0).toFixed(2).replace(".", ",")}%</div></div></div>`).join("") + (account ? `<div class="prow"><div><strong>Рубли</strong><div class="muted">свободно, не покупка</div></div><div class="right"><strong>${moneyText(account.cash)}</strong></div></div>` : "")) || `<div class="muted">Покупок пока нет</div>`;
+  document.querySelector("#accountList").innerHTML = (purchases.map((item) => { const shift = changeOf(item); return `<div class="prow"><div><strong>${esc(item.name)}</strong><div class="muted">${esc(item.ticker)} · ${esc(item.group)} · ${qtyText(item.quantity)}${item.average ? " · средняя " + item.average.toFixed(2) : ""}</div></div><div class="right"><strong>${moneyText(item.value)}</strong><div class="${shift.pnl < 0 ? "down" : "up"}">${fineMoney(shift.pnl)} · ${shift.pct.toFixed(2).replace(".", ",")}%</div></div></div>`; }).join("") + (account ? `<div class="prow"><div><strong>Рубли</strong><div class="muted">свободно, не покупка</div></div><div class="right"><strong>${moneyText(account.cash)}</strong></div></div>` : "")) || `<div class="muted">Покупок пока нет</div>`;
   document.querySelector("#accountList").hidden = !accountOpen;
   document.querySelector("#foldAccount").classList.toggle("shut", !accountOpen);
   renderCategory();
@@ -602,7 +620,7 @@ function renderCategory() {
     return false;
   };
   const held = positions.filter(belongs);
-  const heldHtml = held.length ? held.map((item) => '<div class="prow"><div><strong>' + esc(item.name) + '</strong><div class="muted">' + esc(item.ticker) + ' · ' + item.quantity.toFixed(2) + '</div></div><div class="right"><strong>' + money(item.value) + '</strong></div></div>').join("") : '<div class="muted">Из этой категории на счёте пока ничего не куплено.</div>';
+  const heldHtml = held.length ? held.map((item) => { const shift = changeOf(item); return '<div class="prow"><div><strong>' + esc(item.name) + '</strong><div class="muted">' + esc(item.ticker) + ' · ' + item.quantity.toFixed(2) + (item.average ? ' · средняя ' + item.average.toFixed(2) : '') + '</div></div><div class="right"><strong>' + money(item.value) + '</strong><div class="' + (shift.pnl < 0 ? 'down' : 'up') + '">' + fineMoney(shift.pnl) + ' · ' + shift.pct.toFixed(2).replace('.', ',') + '%</div></div></div>'; }).join("") : '<div class="muted">Из этой категории на счёте пока ничего не куплено.</div>';
   let plan = "";
   if (openCategory === "Пары" && current) plan = "План: доллар " + Math.round(current.weights.usd * 100) + "%, юань " + Math.round(current.weights.cny * 100) + "%. Внутри пары облигация и шорт фьючерса. Сейчас доллар " + (current.usd == null ? "без бумаги" : current.usd.toFixed(1) + "%") + ", юань " + (current.cny == null ? "без бумаги" : current.cny.toFixed(1) + "%") + ".";
   if (openCategory === "Фонды" && board) plan = "План: LQDT " + Math.round((current?.weights.lqdt || 0) * 100) + "% при доходности " + board.lqdt.toFixed(1) + "%, TMON " + Math.round((current?.weights.tmon || 0) * 100) + "% при доходности " + board.tmon.toFixed(1) + "%.";
@@ -832,7 +850,7 @@ function showPage() {
 window.addEventListener("popstate", showPage);
 showPage();
 refresh(false);
-setInterval(() => refresh(false), 3 * 60 * 1000);
+setInterval(() => refresh(true), 60 * 1000);
 </script>
 </body>
 </html>
