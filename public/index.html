@@ -9,6 +9,7 @@
     * { box-sizing: border-box; }
     nav { display: flex; gap: 8px; }
     [data-page] { display: grid; gap: 12px; }
+    [data-page][hidden] { display: none; }
     nav a { text-decoration: none; color: inherit; background: var(--card); border-radius: 12px; padding: 8px 14px; font-weight: 700; }
     nav a.on { background: var(--yellow); }
     nav a:hover { background: var(--line); }
