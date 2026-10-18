@@ -99,6 +99,7 @@
       <label class="check"><input id="reinvest" type="checkbox" checked> Реинвестировать купоны и фандинг в лучшую корзину</label>
       <label class="check"><input id="auto" type="checkbox"> Разрешить заявки без отдельного подтверждения</label>
       <div class="muted" id="next"></div>
+      <button type="button" data-step>Сделать шаг</button>
     </div>
     <div class="panel">
       <div class="muted">Журнал</div>
@@ -108,6 +109,13 @@
   <section class="split">
     <div class="panel donut"><svg id="ring"></svg><div id="legend"></div></div>
     <div class="sleeves" id="sleeves"></div>
+  </section>
+  <section class="panel">
+    <div class="top"><h2>Факт на счёте</h2><span class="muted" id="factline">Позиции ещё не загружены</span></div>
+    <div class="scroll"><table>
+      <thead><tr><th>Инструмент</th><th>Группа</th><th>Количество</th><th>Цена</th><th>Стоимость</th></tr></thead>
+      <tbody id="homePositions"></tbody>
+    </table></div>
   </section>
   </section>
   <section class="panel" data-page="/bonds">
@@ -151,6 +159,31 @@
       <div class="muted">Три корзины. Если валютная пара слабее денежного рынка, её доля уходит в рублёвые облигации и фонды.</div>
     </header>
     <div class="sleeves" id="strategy"></div>
+    <section class="panel">
+      <div class="top"><h2>Заявки</h2><button type="button" data-step class="add">Сделать шаг</button></div>
+      <div id="attempts" class="muted">Шаг ещё не выполнялся. Он ставит рыночные заявки на 1 лот по выбранным бумагам, фондам и шорту фьючерса.</div>
+    </section>
+    <section class="panel">
+      <h2>Открытые заявки брокера</h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Инструмент</th><th>Направление</th><th>Лоты</th><th>Исполнено</th><th>Статус</th></tr></thead>
+        <tbody id="liveOrders"></tbody>
+      </table></div>
+    </section>
+    <section class="panel">
+      <h2>Факт по бумагам</h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Инструмент</th><th>Группа</th><th>Количество</th><th>Цена</th><th>Стоимость</th><th>Доля</th></tr></thead>
+        <tbody id="strategyPositions"></tbody>
+      </table></div>
+    </section>
+    <section class="panel">
+      <h2>Журнал операций</h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Время</th><th>Операция</th><th>Бумага</th><th>Количество</th><th>Сумма</th></tr></thead>
+        <tbody id="operations"></tbody>
+      </table></div>
+    </section>
   </section>
 <div id="toast"></div>
 </main>
@@ -159,6 +192,9 @@ const SANDBOX = "t.FYCrHI6u8UGEs6RhUrpV0ixAVRFCJg0IowCXxQ7uOQdNwgSsO5o42B9hhvN9U
 const colors = { Пары: "#ffdd2d", Фонды: "#3b78f0", Облигации: "#2a2a2a" };
 const tokenInput = document.querySelector("#token");
 tokenInput.value = localStorage.getItem("carry-token") || SANDBOX;
+let accountState = null;
+let attempts = [];
+let stepping = false;
 let board = null;
 let picks = JSON.parse(localStorage.getItem("carry-picks") || '{"rub":[],"usd":[],"cny":[]}');
 let excluded = JSON.parse(localStorage.getItem("carry-excluded") || '{"usd":false,"cny":false}');
@@ -309,7 +345,7 @@ function draw() {
   toggle.classList.toggle("add", !active);
   const best = !current ? "рублёвые облигации" : current.usd >= current.cny && current.usd >= current.rubYtm ? "пару доллар" : current.cny >= current.rubYtm ? "пару юань" : "рублёвые облигации";
   document.querySelector("#next").textContent = active
-    ? (reinvest ? "Купоны и фандинг направляются в " + best + ". " : "Реинвестирование выключено. ") + (autoOrders ? "Автозаявки отмечены, на биржу пока не отправляются." : "Новые заявки только с вашим подтверждением.")
+    ? (reinvest ? "Купоны и фандинг направляются в " + best + ". " : "Реинвестирование выключено. ") + (autoOrders ? "Разрешение на заявки включено. Нажмите «Сделать шаг»." : "Заявки не отправляются, пока нет разрешения.")
     : "Пока стратегия остановлена, бумаги только попадают в план.";
   document.querySelector("#log").innerHTML = log.length ? log.map((item) => `<div><strong>${esc(item.time)}</strong> ${esc(item.text)}</div>`).join("") : "<div class='muted'>Пока пусто</div>";
   const gap = document.querySelector("#gap");
@@ -373,6 +409,17 @@ function draw() {
     const labelText = included ? "Исключить" : label;
     return `<tr><td><strong>${esc(bond.name)}</strong><div class="muted">${esc(bond.kind)}</div></td><td class="${bond.risk === "высокий" ? "down" : bond.risk === "низкий" ? "up" : ""}"><strong>${esc(bond.rating || "не указан")}</strong><div class="muted">${esc(bond.risk || "")}</div></td><td><strong>${bond.ytm.toFixed(2)}%</strong>${bond.offerYield ? `<div class="muted">к оферте ${bond.offerYield.toFixed(1)}%</div>` : ""}</td><td>${bond.coupon === null ? "плавающий" : bond.coupon.toFixed(2) + "%"}${bond.couponYield ? `<div class="muted">текущая ${bond.couponYield.toFixed(1)}%</div>` : ""}</td><td>${esc(bond.frequency)}<div class="muted">${esc(bond.nextCoupon || "")}</div></td><td>${esc(bond.maturity || "нет даты")}</td><td>${bond.durationDays ? (bond.durationDays / 365).toFixed(1) + " г." : "—"}</td><td>${bond.price?.toFixed(2) ?? "—"}</td><td>${bond.turnover ? (bond.turnover / 1e6).toFixed(1) + " млн" : "—"}</td><td><button class="${included ? "" : "add"}" data-add="${sleeveName}:${bond.secid}">${labelText}</button></td></tr>`;
   }).join("");
+  const positions = accountState?.account?.positions || [];
+  const total = positions.reduce((sum, item) => sum + item.value, 0) || accountState?.account?.total || 0;
+  document.querySelector("#factline").textContent = positions.length ? `${positions.length} позиций · ${Math.round(total).toLocaleString("ru-RU")} ₽` : "На счёте нет позиций";
+  const rowOf = (item, share) => `<tr><td><strong>${esc(item.name)}</strong><div class="muted">${esc(item.ticker || "")}</div></td><td>${esc(item.group)}</td><td>${item.quantity.toFixed(2)}</td><td>${item.price ? item.price.toFixed(2) : "—"}</td><td>${Math.round(item.value).toLocaleString("ru-RU")} ₽</td>${share}</tr>`;
+  document.querySelector("#homePositions").innerHTML = positions.length ? positions.map((item) => rowOf(item, "")).join("") : `<tr><td colspan="5" class="muted">Позиций нет. Запустите шаг стратегии.</td></tr>`;
+  document.querySelector("#strategyPositions").innerHTML = positions.length ? positions.map((item) => rowOf(item, `<td>${total ? (item.value / total * 100).toFixed(1) : "0"}%</td>`)).join("") : `<tr><td colspan="6" class="muted">Позиций нет.</td></tr>`;
+  const orders = accountState?.orders || [];
+  document.querySelector("#liveOrders").innerHTML = orders.length ? orders.map((item) => `<tr><td>${esc(item.ticker)}</td><td>${esc(item.direction)}</td><td>${item.lots}</td><td>${item.done}</td><td>${esc(String(item.status).replace("EXECUTION_REPORT_STATUS_", ""))}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">Открытых заявок нет</td></tr>`;
+  const ops = accountState?.operations || [];
+  document.querySelector("#operations").innerHTML = ops.length ? ops.map((item) => `<tr><td>${esc((item.date || "").replace("T", " ").slice(0, 16))}</td><td>${esc(item.type)}</td><td>${esc(item.name)}</td><td>${item.quantity || "—"}</td><td>${item.payment ? Math.round(item.payment).toLocaleString("ru-RU") + " ₽" : "—"}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">Операций за 30 дней нет</td></tr>`;
+  if (attempts.length) document.querySelector("#attempts").innerHTML = attempts.map((item) => `<div><strong>${esc(item.status)}</strong> ${esc(item.title)} · ${esc(item.detail || "")}</div>`).join("");
 }
 document.body.addEventListener("click", (event) => {
   const link = event.target.closest("[data-nav]");
@@ -398,8 +445,44 @@ document.body.addEventListener("click", (event) => {
   if (add) { const [name, secid] = add.dataset.add.split(":"); choose(name, secid); }
   if (removeButton) { const [name, secid] = removeButton.dataset.remove.split(":"); remove(name, secid); toast("Бумага исключена из стратегии"); }
   if (pairButton) excludePair(pairButton.dataset.pair);
+  if (event.target.closest("[data-step]")) step();
 });
-document.querySelector("#query").addEventListener("input", draw);
+function buildIntents() {
+  const intents = [];
+  const take = (sleeve) => selected(sleeve).slice(0, 2).forEach((bond) => intents.push({ query: bond.secid, ticker: bond.secid, title: bond.name, direction: "ORDER_DIRECTION_BUY" }));
+  take("rub");
+  if (!excluded.usd) {
+    take("usd");
+    if (selected("usd").length) intents.push({ query: "USDRUBF", ticker: "USDRUBF", title: "Шорт доллара", direction: "ORDER_DIRECTION_SELL" });
+  }
+  if (!excluded.cny) {
+    take("cny");
+    if (selected("cny").length) intents.push({ query: "CNYRUBF", ticker: "CNYRUBF", title: "Шорт юаня", direction: "ORDER_DIRECTION_SELL" });
+  }
+  intents.push({ query: "LQDT", ticker: "LQDT", title: "Фонд LQDT", direction: "ORDER_DIRECTION_BUY" });
+  intents.push({ query: "TMON", ticker: "TMON", title: "Фонд TMON", direction: "ORDER_DIRECTION_BUY" });
+  return intents;
+}
+async function step() {
+  if (stepping) return;
+  if (!active) { toast("Сначала запустите стратегию"); return; }
+  stepping = true;
+  document.querySelectorAll("[data-step]").forEach((button) => { button.textContent = "Выставляю…"; });
+  try {
+    const response = await fetch("/api/step", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim(), auto: autoOrders, intents: buildIntents() }) }).then((item) => item.json());
+    attempts = response.attempts || [];
+    if (!attempts.length) attempts = [{ title: "Шаг", status: "пусто", detail: response.error || response.note || "брокер не вернул заявки" }];
+    attempts.forEach((item) => record(`${item.title}: ${item.status}`));
+    toast(attempts.map((item) => item.status).join(", "));
+    await refresh(false);
+  } catch (error) {
+    toast(error.message || "Шаг не выполнен");
+  } finally {
+    stepping = false;
+    document.querySelectorAll("[data-step]").forEach((button) => { button.textContent = "Сделать шаг"; });
+    draw();
+  }
+}
 document.querySelectorAll(".ranges input, .ranges select").forEach((input) => input.addEventListener("input", draw));
 async function refresh(force) {
   document.querySelector("#refresh").textContent = "Обновляю…";
@@ -416,6 +499,7 @@ async function refresh(force) {
       save();
     }
     if (account?.account) document.querySelector("#title").textContent = account.account.name;
+    accountState = account;
     document.querySelector("#note").textContent = account?.note || account?.error || "";
     draw();
   } catch (error) {
@@ -432,6 +516,7 @@ document.querySelector("#toggle").addEventListener("click", () => {
   record(active ? "Стратегия запущена" : "Стратегия остановлена");
   toast(active ? "Стратегия запущена" : "Стратегия остановлена");
   draw();
+  if (active) step();
 });
 document.querySelector("#reinvest").addEventListener("change", (event) => {
   reinvest = event.target.checked;

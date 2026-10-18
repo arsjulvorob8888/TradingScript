@@ -190,16 +190,131 @@ async function desk(token) {
   const portfolio = await tbank(cleaned, link.host, link.sandbox ? "SandboxService" : "OperationsService", link.sandbox ? "GetSandboxPortfolio" : "GetPortfolio", { accountId: account.id });
   const positions = (portfolio.positions || []).map((item) => ({
     name: item.name || item.ticker || "Позиция",
+    ticker: item.ticker || "",
     group: groupOf(item.ticker || "", item.instrumentType || ""),
+    quantity: money(item.quantity),
+    price: money(item.currentPrice),
     value: Math.abs(money(item.currentPrice) * money(item.quantity)),
-  })).filter((item) => item.value > 0);
+  })).filter((item) => item.value > 0 || item.quantity !== 0);
   result.account = {
     name: account.name || (link.sandbox ? "Песочница" : "Счёт"),
     total: money(portfolio.totalAmountPortfolio) || positions.reduce((sum, item) => sum + item.value, 0),
     positions,
   };
-  result.note = link.sandbox ? "Подключена песочница. Заявки не отправляются." : "Подключён боевой счёт. Заявки не отправляются.";
+  result.operations = await operations(cleaned, link, account.id);
+  result.orders = await openOrders(cleaned, link, account.id);
+  result.sandbox = link.sandbox;
+  result.note = link.sandbox ? "Подключена песочница. Шаг стратегии ставит рыночные заявки на 1 лот." : "Подключён боевой счёт. Шаг ставит рыночные заявки на 1 лот только с разрешением.";
   return result;
+}
+
+async function operations(token, link, accountId) {
+  try {
+    const to = new Date().toISOString();
+    const from = new Date(Date.now() - 30 * 86400000).toISOString();
+    const method = link.sandbox ? "GetSandboxOperations" : "GetOperations";
+    const service = link.sandbox ? "SandboxService" : "OperationsService";
+    const payload = await tbank(token, link.host, service, method, { accountId, from, to });
+    return (payload.operations || []).slice(0, 30).map((item) => ({
+      date: item.date,
+      type: operationName(item.operationType || item.type),
+      name: item.name || item.figi || "Операция",
+      payment: money(item.payment),
+      quantity: money(item.quantity),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function openOrders(token, link, accountId) {
+  try {
+    const method = link.sandbox ? "GetSandboxOrders" : "GetOrders";
+    const service = link.sandbox ? "SandboxService" : "OrdersService";
+    const payload = await tbank(token, link.host, service, method, { accountId });
+    return (payload.orders || []).map((item) => ({
+      ticker: item.ticker || item.figi || "Заявка",
+      lots: Number(item.lotsRequested || 0),
+      done: Number(item.lotsExecuted || 0),
+      direction: String(item.direction || "").includes("SELL") ? "продажа" : "покупка",
+      status: item.executionReportStatus || "выставлена",
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function operationName(type) {
+  const names = {
+    OPERATION_TYPE_BUY: "Покупка",
+    OPERATION_TYPE_SELL: "Продажа",
+    OPERATION_TYPE_BROKER_FEE: "Комиссия",
+    OPERATION_TYPE_COUPON: "Купон",
+    OPERATION_TYPE_DIVIDEND: "Дивиденд",
+    OPERATION_TYPE_INPUT: "Пополнение",
+    OPERATION_TYPE_OUTPUT: "Вывод",
+    OPERATION_TYPE_TAX: "Налог",
+  };
+  return names[type] || String(type || "Операция").replace("OPERATION_TYPE_", "");
+}
+
+async function trade(token, auto, intents) {
+  const plan = Array.isArray(intents) ? intents.slice(0, 8) : [];
+  if (!auto) {
+    return { attempts: plan.map((item) => ({ title: item.title, ticker: item.ticker, status: "не отправлена", detail: "нет разрешения на заявки" })) };
+  }
+  const cleaned = String(token || "").trim().replace(/^bearer\s+/i, "").replace(/\s+/g, "");
+  const link = await contour(cleaned);
+  const account = link.accounts[0];
+  if (!account) return { attempts: [], note: "Счёт не найден." };
+  const portfolio = await tbank(cleaned, link.host, link.sandbox ? "SandboxService" : "OperationsService", link.sandbox ? "GetSandboxPortfolio" : "GetPortfolio", { accountId: account.id });
+  const held = new Map((portfolio.positions || []).map((item) => [item.ticker, money(item.quantity)]));
+  const attempts = [];
+  if (link.sandbox && money(portfolio.totalAmountPortfolio) < 50000) {
+    await tbank(cleaned, link.host, "SandboxService", "SandboxPayIn", { accountId: account.id, amount: { currency: "rub", units: "1000000", nano: 0 } });
+    attempts.push({ title: "Пополнение песочницы", ticker: "RUB", status: "исполнена", detail: "зачислено 1 000 000 ₽, иначе заявки не проходят" });
+  }
+  for (const intent of plan) {
+    const owned = held.get(intent.ticker) || 0;
+    const sell = String(intent.direction).includes("SELL");
+    if (!sell && owned > 0) {
+      attempts.push({ title: intent.title, ticker: intent.ticker, status: "пропущена", detail: "уже есть в портфеле" });
+      continue;
+    }
+    if (sell && owned < 0) {
+      attempts.push({ title: intent.title, ticker: intent.ticker, status: "пропущена", detail: "шорт уже открыт" });
+      continue;
+    }
+    try {
+      const found = await tbank(cleaned, link.host, "InstrumentsService", "FindInstrument", { query: intent.query || intent.ticker });
+      const pool = (found.instruments || []).filter((item) => item.ticker === intent.ticker || item.isin === intent.ticker);
+      const match = pool.find((item) => item.apiTradeAvailableFlag);
+      if (!match) {
+        attempts.push({ title: intent.title, ticker: intent.ticker, status: "недоступна", detail: pool.length ? "брокер не даёт выставлять эту бумагу через API" : "инструмент не найден в Т-Банке" });
+        continue;
+      }
+      const posted = await tbank(cleaned, link.host, link.sandbox ? "SandboxService" : "OrdersService", link.sandbox ? "PostSandboxOrder" : "PostOrder", {
+        quantity: "1",
+        direction: intent.direction,
+        accountId: account.id,
+        orderType: "ORDER_TYPE_MARKET",
+        orderId: crypto.randomUUID(),
+        instrumentId: match.uid || match.figi,
+      });
+      const status = String(posted.executionReportStatus || "");
+      attempts.push({
+        title: intent.title,
+        ticker: intent.ticker,
+        status: status.includes("FILL") ? "исполнена" : "выставлена",
+        detail: `${sell ? "продажа" : "покупка"} 1 лот · ${status.replace("EXECUTION_REPORT_STATUS_", "") || "принята"}`,
+      });
+    } catch (error) {
+      const text = error instanceof Error ? error.message : "ошибка заявки";
+      const detail = text.includes("not available for trading") ? "биржа сейчас не принимает заявку" : text.includes("Not enough") ? "не хватает средств или маржи" : text.slice(0, 180);
+      attempts.push({ title: intent.title, ticker: intent.ticker, status: "отклонена", detail });
+    }
+  }
+  return { attempts, sandbox: link.sandbox };
 }
 
 const port = Number(process.env.PORT || 8080);
@@ -207,6 +322,15 @@ createServer(async (req, res) => {
   try {
     if (req.method === "POST" && req.url === "/api/bonds") {
       const payload = JSON.stringify(await listBonds(true));
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(payload);
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/step") {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+      const payload = JSON.stringify(await trade(body.token, Boolean(body.auto), body.intents));
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       res.end(payload);
       return;
