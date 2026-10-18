@@ -661,7 +661,7 @@ function renderProgress(moneyText) {
   const cash = account ? account.cash : 0;
   blocks.push('<div class="lane"><div class="top"><h3>Рубли</h3><span class="badge ok">свободно</span></div><div>' + moneyText(cash) + ' — это не заявка, а валюта на счёте. Из неё скрипт набирает остальные корзины.</div></div>');
   const stage = !active ? "Стратегия остановлена" : !session.open ? "Биржа закрыта" : lanes.every((lane) => lane.weight <= 0 || valueOf(lane.tickers) + 1000 >= total * lane.weight) ? "План набран" : stepping ? "Выставляю заявки" : "Можно набирать план";
-  document.querySelector("#stage").textContent = stage + ". " + session.text;
+  document.querySelector("#stage").textContent = !session.open ? session.text : stage + ". " + session.text;
   const fold = document.querySelector("#foldProgress");
   fold.classList.toggle("shut", !progressOpen);
   document.querySelector("#progress").hidden = !progressOpen;
