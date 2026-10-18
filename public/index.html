@@ -161,6 +161,7 @@ const tokenInput = document.querySelector("#token");
 tokenInput.value = localStorage.getItem("carry-token") || SANDBOX;
 let board = null;
 let picks = JSON.parse(localStorage.getItem("carry-picks") || '{"rub":[],"usd":[],"cny":[]}');
+let excluded = JSON.parse(localStorage.getItem("carry-excluded") || '{"usd":false,"cny":false}');
 let active = localStorage.getItem("carry-active") === "1";
 let autoOrders = localStorage.getItem("carry-auto") === "1";
 let reinvest = localStorage.getItem("carry-reinvest") !== "0";
@@ -220,8 +221,11 @@ function model() {
   const cny = cnyAvg === null ? 14.2 : carry(cnyAvg, board.fundingCny, cnyBonds[0]?.price ?? 100);
   const hurdle = Math.max(board.lqdt, board.tmon);
   const weights = { usd: 0.4, cny: 0.2, rub: 0.25, lqdt: 0.1, tmon: 0.05 };
-  if (usd < hurdle) { const cut = weights.usd * 0.5; weights.usd -= cut; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
-  if (cny < hurdle) { const cut = weights.cny * 0.5; weights.cny -= cut; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
+  const release = (key) => { const cut = weights[key]; weights[key] = 0; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; };
+  if (excluded.usd) release("usd");
+  else if (usd < hurdle) { const cut = weights.usd * 0.5; weights.usd -= cut; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
+  if (excluded.cny) release("cny");
+  else if (cny < hurdle) { const cut = weights.cny * 0.5; weights.cny -= cut; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
   const forecast = weights.usd * usd + weights.cny * cny + weights.rub * rubYtm + weights.lqdt * board.lqdt + weights.tmon * board.tmon;
   return { rubYtm, usd, cny, weights, forecast };
 }
@@ -242,18 +246,32 @@ function ring(parts) {
   document.querySelector("#ring").innerHTML = `<circle cx="50" cy="50" r="30" stroke="#e6e8ec" stroke-width="12" fill="none"/>${arcs}`;
 }
 function save() { localStorage.setItem("carry-picks", JSON.stringify(picks)); }
+function saveExcluded() { localStorage.setItem("carry-excluded", JSON.stringify(excluded)); }
 function choose(sleeve, secid) {
   const bond = (board?.bonds || []).find((item) => item.secid === secid);
   const name = bond ? bond.name : secid;
   const where = sleeveName(sleeve);
   if (picks[sleeve].includes(secid)) {
-    toast(name + " уже в корзине: " + where);
+    remove(sleeve, secid);
+    record(name + " исключена из стратегии");
+    toast(name + " исключена из стратегии");
     return;
   }
+  if (excluded[sleeve]) { excluded[sleeve] = false; saveExcluded(); }
   picks[sleeve].push(secid);
   save();
   record(name + " добавлена в " + where);
   toast(name + " добавлена в " + where);
+  draw();
+}
+function excludePair(sleeve) {
+  const title = sleeve === "usd" ? "Пара доллар" : "Пара юань";
+  excluded[sleeve] = !excluded[sleeve];
+  if (excluded[sleeve]) picks[sleeve] = [];
+  save();
+  saveExcluded();
+  record(excluded[sleeve] ? title + " исключена" : title + " возвращена");
+  toast(excluded[sleeve] ? title + " исключена. Доля ушла в рублёвые и фонды" : title + " снова в стратегии");
   draw();
 }
 function remove(sleeve, secid) {
@@ -262,7 +280,8 @@ function remove(sleeve, secid) {
   draw();
 }
 function sleeve(title, value, bonds, hint, name) {
-  return `<div class="sleeve"><div class="top"><h2>${title}</h2><div class="value">${value === null ? "—" : value.toFixed(1) + "%"}</div></div><div class="muted">${hint}</div><div class="chips">${bonds.map((bond) => `<button data-remove="${name}:${bond.secid}">${esc(bond.name)} ${bond.ytm.toFixed(1)}% ×</button>`).join("")}</div></div>`;
+  const pair = name === "usd" || name === "cny" ? `<button data-pair="${name}">${excluded[name] ? "Вернуть пару" : "Исключить пару"}</button>` : "";
+  return `<div class="sleeve"><div class="top"><h2>${title}</h2><div class="value">${excluded[name] ? "0%" : value === null ? "—" : value.toFixed(1) + "%"}</div></div><div class="muted">${excluded[name] ? "пара исключена, доля в рублёвых и фондах" : hint}</div><div class="chips">${bonds.map((bond) => `<button data-remove="${name}:${bond.secid}">${esc(bond.name)} ${bond.ytm.toFixed(1)}% ×</button>`).join("")}</div>${pair}</div>`;
 }
 function draw() {
   const current = model();
@@ -310,7 +329,7 @@ function draw() {
     sleeve("Пара юань", current ? current.cny : null, cny, cny.length ? "облигация плюс шорт фьючерса" : "не выбрана, в расчёте 14,2%", "cny"),
   ].join("");
   const labels = [["ОФЗ", "ОФЗ"], ["Корпоративная", "Корпоративные"], ["USD", "Доллар"], ["CNY", "Юань"]];
-  document.querySelector("#filters").innerHTML = labels.map(([id, label]) => `<button class="${filter === id ? "on" : ""}" data-filter="${id}">${label}</button>`).join("") + `<button data-risk>${risky ? "Скрыть рискованные" : "Показать рискованные"}</button>`;
+  document.querySelector("#filters").innerHTML = labels.map(([id, label]) => `<button class="${filter === id ? "on" : ""}" data-filter="${id}">${label}</button>`).join("") + `<button data-risk>${risky ? "Скрыть рискованные" : "Показать рискованные"}</button>` + ((filter === "USD" || filter === "CNY") ? `<button data-pair="${filter === "USD" ? "usd" : "cny"}">${excluded[filter === "USD" ? "usd" : "cny"] ? "Вернуть пару" : "Исключить пару"}</button>` : "");
   document.querySelectorAll("[data-sort]").forEach((button) => {
     button.textContent = button.dataset.label + (button.dataset.sort === sortKey ? (sortDir < 0 ? " ↓" : " ↑") : "");
   });
@@ -349,7 +368,9 @@ function draw() {
   document.querySelector("#rows").innerHTML = visible.map((bond) => {
     const action = bond.currency === "USD" ? "usd:В пару $" : bond.currency === "CNY" ? "cny:В пару ¥" : "rub:В рублёвые";
     const [sleeveName, label] = action.split(":");
-    return `<tr><td><strong>${esc(bond.name)}</strong><div class="muted">${esc(bond.kind)}</div></td><td class="${bond.risk === "высокий" ? "down" : bond.risk === "низкий" ? "up" : ""}"><strong>${esc(bond.rating || "не указан")}</strong><div class="muted">${esc(bond.risk || "")}</div></td><td><strong>${bond.ytm.toFixed(2)}%</strong>${bond.offerYield ? `<div class="muted">к оферте ${bond.offerYield.toFixed(1)}%</div>` : ""}</td><td>${bond.coupon === null ? "плавающий" : bond.coupon.toFixed(2) + "%"}${bond.couponYield ? `<div class="muted">текущая ${bond.couponYield.toFixed(1)}%</div>` : ""}</td><td>${esc(bond.frequency)}<div class="muted">${esc(bond.nextCoupon || "")}</div></td><td>${esc(bond.maturity || "нет даты")}</td><td>${bond.durationDays ? (bond.durationDays / 365).toFixed(1) + " г." : "—"}</td><td>${bond.price?.toFixed(2) ?? "—"}</td><td>${bond.turnover ? (bond.turnover / 1e6).toFixed(1) + " млн" : "—"}</td><td><button class="add" data-add="${sleeveName}:${bond.secid}">${picks[sleeveName].includes(bond.secid) ? "Добавлено" : label}</button></td></tr>`;
+    const included = picks[sleeveName].includes(bond.secid);
+    const labelText = included ? "Исключить" : label;
+    return `<tr><td><strong>${esc(bond.name)}</strong><div class="muted">${esc(bond.kind)}</div></td><td class="${bond.risk === "высокий" ? "down" : bond.risk === "низкий" ? "up" : ""}"><strong>${esc(bond.rating || "не указан")}</strong><div class="muted">${esc(bond.risk || "")}</div></td><td><strong>${bond.ytm.toFixed(2)}%</strong>${bond.offerYield ? `<div class="muted">к оферте ${bond.offerYield.toFixed(1)}%</div>` : ""}</td><td>${bond.coupon === null ? "плавающий" : bond.coupon.toFixed(2) + "%"}${bond.couponYield ? `<div class="muted">текущая ${bond.couponYield.toFixed(1)}%</div>` : ""}</td><td>${esc(bond.frequency)}<div class="muted">${esc(bond.nextCoupon || "")}</div></td><td>${esc(bond.maturity || "нет даты")}</td><td>${bond.durationDays ? (bond.durationDays / 365).toFixed(1) + " г." : "—"}</td><td>${bond.price?.toFixed(2) ?? "—"}</td><td>${bond.turnover ? (bond.turnover / 1e6).toFixed(1) + " млн" : "—"}</td><td><button class="${included ? "" : "add"}" data-add="${sleeveName}:${bond.secid}">${labelText}</button></td></tr>`;
   }).join("");
 }
 document.body.addEventListener("click", (event) => {
@@ -364,6 +385,7 @@ document.body.addEventListener("click", (event) => {
   const sortButton = event.target.closest("[data-sort]");
   const add = event.target.closest("[data-add]");
   const removeButton = event.target.closest("[data-remove]");
+  const pairButton = event.target.closest("[data-pair]");
   if (filterButton) { filter = filterButton.dataset.filter; draw(); }
   if (riskButton) { risky = !risky; draw(); }
   if (sortButton) {
@@ -372,8 +394,9 @@ document.body.addEventListener("click", (event) => {
     else { sortKey = key; sortDir = key === "name" || key === "maturity" || key === "frequency" ? 1 : -1; }
     draw();
   }
-  if (add) { const [sleeveName, secid] = add.dataset.add.split(":"); choose(sleeveName, secid); }
-  if (removeButton) { const [sleeveName, secid] = removeButton.dataset.remove.split(":"); remove(sleeveName, secid); }
+  if (add) { const [name, secid] = add.dataset.add.split(":"); choose(name, secid); }
+  if (removeButton) { const [name, secid] = removeButton.dataset.remove.split(":"); remove(name, secid); toast("Бумага исключена из стратегии"); }
+  if (pairButton) excludePair(pairButton.dataset.pair);
 });
 document.querySelector("#query").addEventListener("input", draw);
 document.querySelectorAll(".ranges input, .ranges select").forEach((input) => input.addEventListener("input", draw));
