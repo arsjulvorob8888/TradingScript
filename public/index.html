@@ -56,6 +56,7 @@
     #toast.show { opacity: 1; }
     .control { display: grid; grid-template-columns: 1.4fr .8fr; gap: 12px; }
     .check { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+    #reinvestTo { height: 36px; border-radius: 10px; background: var(--bg); }
     .check input { width: auto; min-width: 0; height: auto; }
     #log div + div { margin-top: 6px; }
     @media (max-width: 800px) { .control { display: block; } .control .panel + .panel { margin-top: 8px; } }
@@ -96,7 +97,14 @@
         </div>
         <button id="toggle" class="add" type="button">Запустить стратегию</button>
       </div>
-      <label class="check"><input id="reinvest" type="checkbox" checked> Реинвестировать купоны и фандинг в лучшую корзину</label>
+      <label class="check"><input id="reinvest" type="checkbox" checked> Реинвестировать купоны и фандинг</label>
+      <label class="check">Куда<select id="reinvestTo">
+        <option value="best">В лучшую корзину</option>
+        <option value="rub">В рублёвые облигации</option>
+        <option value="usd">В пару доллар</option>
+        <option value="cny">В пару юань</option>
+        <option value="funds">В денежный рынок</option>
+      </select></label>
       <label class="check"><input id="auto" type="checkbox"> Разрешить заявки без отдельного подтверждения</label>
       <div class="muted" id="next"></div>
       <button type="button" data-step>Сделать шаг</button>
@@ -201,6 +209,7 @@ let excluded = JSON.parse(localStorage.getItem("carry-excluded") || '{"usd":fals
 let active = localStorage.getItem("carry-active") === "1";
 let autoOrders = localStorage.getItem("carry-auto") === "1";
 let reinvest = localStorage.getItem("carry-reinvest") !== "0";
+let reinvestTo = localStorage.getItem("carry-reinvest-to") || "best";
 let log = JSON.parse(localStorage.getItem("carry-log") || "[]");
 let toastTimer;
 
@@ -356,8 +365,10 @@ function draw() {
     ["фонды", Math.max(board?.lqdt || 0, board?.tmon || 0)],
   ].filter(Boolean).sort((a, b) => b[1] - a[1]);
   const best = choices[0][0];
+  const names = { best: "лучшую корзину", rub: "рублёвые облигации", usd: "пару доллар", cny: "пару юань", funds: "денежный рынок" };
+  const target = !reinvest ? "" : reinvestTo === "best" ? best : names[reinvestTo];
   document.querySelector("#next").textContent = active
-    ? (reinvest ? "Купоны и фандинг направляются в " + best + ". " : "Реинвестирование выключено. ") + (autoOrders ? "Разрешение на заявки включено. Нажмите «Сделать шаг»." : "Заявки не отправляются, пока нет разрешения.")
+    ? (reinvest ? "Купоны и фандинг направляются в " + target + ". " : "Реинвестирование выключено. ") + (autoOrders ? "Разрешение на заявки включено. Нажмите «Сделать шаг»." : "Заявки не отправляются, пока нет разрешения.")
     : "Пока стратегия остановлена, бумаги только попадают в план.";
   document.querySelector("#log").innerHTML = log.length ? log.map((item) => `<div><strong>${esc(item.time)}</strong> ${esc(item.text)}</div>`).join("") : "<div class='muted'>Пока пусто</div>";
   const gap = document.querySelector("#gap");
@@ -459,8 +470,25 @@ document.body.addEventListener("click", (event) => {
   if (pairButton) excludePair(pairButton.dataset.pair);
   if (event.target.closest("[data-step]")) step();
 });
+function reinvestIntent() {
+  if (!reinvest) return null;
+  const current = model();
+  const ranked = [
+    current?.rubYtm != null ? ["rub", current.rubYtm] : null,
+    current?.usd != null ? ["usd", current.usd] : null,
+    current?.cny != null ? ["cny", current.cny] : null,
+    ["funds", Math.max(board?.lqdt || 0, board?.tmon || 0)],
+  ].filter(Boolean).sort((a, b) => b[1] - a[1]);
+  const sleeve = reinvestTo === "best" ? ranked[0][0] : reinvestTo;
+  if (sleeve === "funds") return { query: "LQDT", ticker: "LQDT", title: "Реинвест в LQDT", direction: "ORDER_DIRECTION_BUY" };
+  const bond = selected(sleeve)[0];
+  if (!bond) return { query: "LQDT", ticker: "LQDT", title: "Реинвест в LQDT: в выбранной корзине нет бумаги", direction: "ORDER_DIRECTION_BUY" };
+  return { query: bond.secid, ticker: bond.secid, title: "Реинвест: " + bond.name, direction: "ORDER_DIRECTION_BUY" };
+}
 function buildIntents() {
   const intents = [];
+  const extra = reinvestIntent();
+  if (extra) intents.push(extra);
   const take = (sleeve) => selected(sleeve).slice(0, 2).forEach((bond) => intents.push({ query: bond.secid, ticker: bond.secid, title: bond.name, direction: "ORDER_DIRECTION_BUY" }));
   take("rub");
   if (!excluded.usd) {
@@ -473,7 +501,7 @@ function buildIntents() {
   }
   intents.push({ query: "LQDT", ticker: "LQDT", title: "Фонд LQDT", direction: "ORDER_DIRECTION_BUY" });
   intents.push({ query: "TMON", ticker: "TMON", title: "Фонд TMON", direction: "ORDER_DIRECTION_BUY" });
-  return intents;
+  return intents.filter((item, index) => intents.findIndex((other) => other.ticker === item.ticker && other.direction === item.direction) === index).slice(0, 8);
 }
 async function step() {
   if (stepping) return;
@@ -521,6 +549,8 @@ async function refresh(force) {
   }
 }
 document.querySelector("#reinvest").checked = reinvest;
+document.querySelector("#reinvestTo").value = reinvestTo;
+document.querySelector("#reinvestTo").disabled = !reinvest;
 document.querySelector("#auto").checked = autoOrders;
 document.querySelector("#toggle").addEventListener("click", () => {
   active = !active;
@@ -533,6 +563,13 @@ document.querySelector("#toggle").addEventListener("click", () => {
 document.querySelector("#reinvest").addEventListener("change", (event) => {
   reinvest = event.target.checked;
   localStorage.setItem("carry-reinvest", reinvest ? "1" : "0");
+  document.querySelector("#reinvestTo").disabled = !reinvest;
+  draw();
+});
+document.querySelector("#reinvestTo").addEventListener("change", (event) => {
+  reinvestTo = event.target.value;
+  localStorage.setItem("carry-reinvest-to", reinvestTo);
+  record("Реинвест: " + event.target.selectedOptions[0].textContent);
   draw();
 });
 document.querySelector("#auto").addEventListener("change", (event) => {
