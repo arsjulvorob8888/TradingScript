@@ -523,38 +523,19 @@ document.body.addEventListener("click", (event) => {
   if (pairButton) excludePair(pairButton.dataset.pair);
   if (event.target.closest("[data-step]")) step();
 });
-function reinvestIntent() {
-  if (!reinvest) return null;
+function buildSleeves() {
   const current = model();
-  const ranked = [
-    current?.rubYtm != null ? ["rub", current.rubYtm] : null,
-    current?.usd != null ? ["usd", current.usd] : null,
-    current?.cny != null ? ["cny", current.cny] : null,
-    ["funds", Math.max(board?.lqdt || 0, board?.tmon || 0)],
-  ].filter(Boolean).sort((a, b) => b[1] - a[1]);
-  const sleeve = reinvestTo === "best" ? ranked[0][0] : reinvestTo;
-  if (sleeve === "funds") return { query: "LQDT", ticker: "LQDT", title: "Реинвест в LQDT", direction: "ORDER_DIRECTION_BUY" };
-  const bond = selected(sleeve)[0];
-  if (!bond) return { query: "LQDT", ticker: "LQDT", title: "Реинвест в LQDT: в выбранной корзине нет бумаги", direction: "ORDER_DIRECTION_BUY" };
-  return { query: bond.secid, ticker: bond.secid, title: "Реинвест: " + bond.name, direction: "ORDER_DIRECTION_BUY" };
-}
-function buildIntents() {
-  const intents = [];
-  const extra = reinvestIntent();
-  if (extra) intents.push(extra);
-  const take = (sleeve) => selected(sleeve).slice(0, 2).forEach((bond) => intents.push({ query: bond.secid, ticker: bond.secid, title: bond.name, direction: "ORDER_DIRECTION_BUY" }));
-  take("rub");
-  if (!excluded.usd) {
-    take("usd");
-    if (selected("usd").length) intents.push({ query: "USDRUBF", ticker: "USDRUBF", title: "Шорт доллара", direction: "ORDER_DIRECTION_SELL" });
-  }
-  if (!excluded.cny) {
-    take("cny");
-    if (selected("cny").length) intents.push({ query: "CNYRUBF", ticker: "CNYRUBF", title: "Шорт юаня", direction: "ORDER_DIRECTION_SELL" });
-  }
-  intents.push({ query: "LQDT", ticker: "LQDT", title: "Фонд LQDT", direction: "ORDER_DIRECTION_BUY" });
-  intents.push({ query: "TMON", ticker: "TMON", title: "Фонд TMON", direction: "ORDER_DIRECTION_BUY" });
-  return intents.filter((item, index) => intents.findIndex((other) => other.ticker === item.ticker && other.direction === item.direction) === index).slice(0, 8);
+  const weights = current ? current.weights : { usd: 0, cny: 0, rub: 0, lqdt: 0, tmon: 0 };
+  const bondOrder = (bond) => ({ query: bond.secid, ticker: bond.secid, title: bond.name });
+  const sleeves = [];
+  if (weights.rub > 0 && selected("rub").length) sleeves.push({ name: "Рублёвые", weight: weights.rub, orders: selected("rub").slice(0, 2).map(bondOrder) });
+  if (!excluded.usd && weights.usd > 0 && selected("usd").length) sleeves.push({ name: "Пара доллар", weight: weights.usd, orders: selected("usd").slice(0, 2).map(bondOrder), hedge: { query: "USDRUBF", ticker: "USDRUBF", title: "Шорт доллара" } });
+  if (!excluded.cny && weights.cny > 0 && selected("cny").length) sleeves.push({ name: "Пара юань", weight: weights.cny, orders: selected("cny").slice(0, 2).map(bondOrder), hedge: { query: "CNYRUBF", ticker: "CNYRUBF", title: "Шорт юаня" } });
+  const funds = [];
+  if (weights.tmon > 0) funds.push({ query: "TMON", ticker: "TMON", title: "TMON", part: weights.tmon });
+  if (weights.lqdt > 0) funds.push({ query: "LQDT", ticker: "LQDT", title: "LQDT", part: weights.lqdt });
+  if (funds.length) sleeves.push({ name: "Фонды", weight: weights.lqdt + weights.tmon, orders: funds });
+  return sleeves;
 }
 async function step() {
   if (stepping) return;
@@ -562,7 +543,7 @@ async function step() {
   stepping = true;
   document.querySelectorAll("[data-step]").forEach((button) => { button.textContent = "Выставляю…"; });
   try {
-    const response = await fetch("/api/step", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim(), auto: autoOrders, accountId: localStorage.getItem("carry-account") || "", intents: buildIntents() }) }).then((item) => item.json());
+    const response = await fetch("/api/step", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim(), auto: autoOrders, accountId: localStorage.getItem("carry-account") || "", sleeves: buildSleeves() }) }).then((item) => item.json());
     attempts = response.attempts || [];
     if (!attempts.length) attempts = [{ title: "Шаг", status: "пусто", detail: response.error || response.note || "брокер не вернул заявки" }];
     attempts.forEach((item) => record(`${item.title}: ${item.status}`));
