@@ -221,7 +221,7 @@ createServer(async (req, res) => {
       return;
     }
     const page = await readFile(join(ROOT, "public", "index.html"));
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
     res.end(page);
   } catch (error) {
     res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });

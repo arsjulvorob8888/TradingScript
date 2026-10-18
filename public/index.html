@@ -5,81 +5,121 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Инвестиции</title>
   <style>
-    :root { color-scheme: light; --bg:#f3f4f6; --card:#fff; --ink:#1c1c1c; --muted:#8b919a; --line:#e6e8ec; --yellow:#ffdd2d; --yellow-2:#f0c400; --blue:#3b78f0; --down:#d0121a; }
+    :root { color-scheme: light; --bg:#f3f4f6; --card:#fff; --ink:#1c1c1c; --muted:#8b919a; --line:#e6e8ec; --yellow:#ffdd2d; --yellow-2:#f5c400; --down:#d0121a; }
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 "Segoe UI", sans-serif; }
-    main { max-width: 960px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
-    header, form, .note, .rings, aside, table { }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 "Segoe UI", sans-serif; }
+    main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
     h1 { margin: 0; font-size: 26px; }
     .muted { color: var(--muted); }
-    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; justify-content: space-between; }
-    .stats, form { display: flex; flex-wrap: wrap; gap: 8px; }
+    .kicker { font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+    header, form, .stats, .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; justify-content: space-between; }
     .card, input, button { background: var(--card); border: 0; border-radius: 12px; }
-    input, button { height: 44px; padding: 0 14px; font: inherit; }
-    input { flex: 1; min-width: 180px; }
+    input, button { height: 40px; padding: 0 12px; font: inherit; }
+    input { min-width: 160px; }
     button { font-weight: 700; cursor: pointer; }
     button:hover { background: var(--line); }
-    button.primary { background: var(--yellow); }
-    button.primary:hover { background: var(--yellow-2); }
+    button.on, button.add { background: var(--yellow); }
+    button.on:hover, button.add:hover { background: var(--yellow-2); }
     .stat { padding: 8px 12px; }
-    .down { color: var(--down); font-weight: 700; }
-    .layout { display: grid; grid-template-columns: 1.4fr .8fr; gap: 12px; }
-    .rings { display: flex; gap: 12px; }
-    .ring, .meter, .note, table { background: var(--card); border-radius: 16px; }
-    .ring { flex: 1; display: flex; gap: 8px; align-items: center; padding: 12px; }
-    svg { width: 112px; height: 112px; flex: 0 0 auto; }
-    .meter { padding: 12px; }
-    .bar { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; margin-top: 8px; }
-    .bar span { display: block; height: 100%; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 8px 14px; }
+    .down { color: var(--down); }
+    .split { display: grid; grid-template-columns: 190px 1fr; gap: 12px; }
+    .panel, .sleeve { background: var(--card); border-radius: 16px; padding: 12px; }
+    .sleeves { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .sleeve h2 { margin: 0; font-size: 14px; }
+    .sleeve .value { font-size: 20px; font-weight: 700; }
+    .top { display: flex; justify-content: space-between; align-items: baseline; }
+    .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+    .chips button { height: 28px; background: var(--bg); font-size: 12px; }
+    svg { width: 96px; height: 96px; }
+    .donut { display: flex; align-items: center; gap: 8px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { text-align: left; padding: 8px; vertical-align: top; }
     th { color: var(--muted); font-weight: 500; }
     tr + tr td { border-top: 1px solid var(--line); }
-    .note { padding: 10px 14px; }
-    @media (max-width: 800px) { .layout, .rings { display: block; } .ring + .ring, .meter { margin-top: 8px; } }
+    .scroll { overflow-x: auto; }
+    .token { flex: 1; }
+    @media (max-width: 800px) { .split, .sleeves { display: block; } .sleeve + .sleeve { margin-top: 8px; } }
   </style>
 </head>
 <body>
 <main>
-  <header class="row">
+  <header>
     <div>
-      <div class="muted">ИНВЕСТИЦИИ</div>
+      <div class="muted kicker">ИНВЕСТИЦИИ</div>
       <h1 id="title">Портфель</h1>
-      <div class="muted" id="account">Счёт не подключён</div>
+      <div class="muted">13,2% была короткая ОФЗ 26232. Длинные ОФЗ сейчас дают около 16,5% к погашению.</div>
     </div>
     <div class="stats">
-      <div class="card stat"><div class="muted">Прогноз</div><strong id="forecast">—</strong></div>
-      <div class="card stat"><div class="muted">Ключевая</div><strong id="key">14%</strong></div>
+      <div class="card stat"><div class="muted">Прогноз стратегии</div><strong id="forecast">—</strong></div>
+      <div class="card stat"><div class="muted">Ключевая</div><strong>14%</strong></div>
       <div class="card stat"><div class="muted">Разрыв</div><strong id="gap">—</strong></div>
     </div>
   </header>
   <form id="form">
-    <input id="token" type="password" placeholder="Токен Т-Инвестиций" autocomplete="off" />
-    <button type="submit">Подключить счёт</button>
-    <button class="primary" id="launch" type="button">Запустить стратегию</button>
+    <input class="token" id="token" type="password" placeholder="Токен Т-Инвестиций" autocomplete="off" />
+    <button type="submit" id="refresh">Обновить с биржи</button>
   </form>
-  <div class="note" id="note"></div>
-  <section class="layout">
-    <div class="rings">
-      <div class="ring"><svg id="planRing"></svg><div><strong>План</strong><div id="planLegend"></div></div></div>
-      <div class="ring"><svg id="factRing"></svg><div><strong>Факт</strong><div id="factLegend" class="muted">На счёте нет позиций</div></div></div>
-    </div>
-    <aside id="meters"></aside>
+  <div class="muted" id="note"></div>
+  <section class="split">
+    <div class="panel donut"><svg id="ring"></svg><div id="legend"></div></div>
+    <div class="sleeves" id="sleeves"></div>
   </section>
-  <section id="catalog"></section>
-  <table>
-    <thead><tr><th>Инструмент</th><th>Группа</th><th>План</th><th>Факт</th><th>Доходность</th></tr></thead>
-    <tbody id="rows"></tbody>
-  </table>
+  <section class="panel">
+    <div class="filters">
+      <div id="filters"></div>
+      <input id="query" placeholder="Название или ISIN" />
+      <span class="muted" id="count"></span>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Бумага</th><th>К погашению</th><th>Купон</th><th>Выплаты</th><th>Погашение</th><th>Дюрация</th><th>Цена</th><th>Оборот</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
 </main>
 <script>
+const SANDBOX = "t.FYCrHI6u8UGEs6RhUrpV0ixAVRFCJg0IowCXxQ7uOQdNwgSsO5o42B9hhvN9UxtVkVZPj9FYgZOJVvAcWRN5OA";
 const colors = { Пары: "#ffdd2d", Фонды: "#3b78f0", Облигации: "#2a2a2a" };
 const tokenInput = document.querySelector("#token");
-tokenInput.value = localStorage.getItem("carry-token") || "";
+tokenInput.value = localStorage.getItem("carry-token") || SANDBOX;
+let board = null;
+let picks = JSON.parse(localStorage.getItem("carry-picks") || '{"rub":[],"usd":[],"cny":[]}');
+let filter = "ОФЗ";
+let risky = false;
 
-function ring(id, parts, empty) {
-  const svg = document.querySelector(id);
-  const data = empty ? [{ name: "Пусто", value: 1, color: "#e6e8ec" }] : parts.filter((item) => item.value > 0);
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"]/g, (char) => ({ "&": "&", "<": "<", ">": ">", '"': """ }[char]));
+}
+function avg(list) { return list.length ? list.reduce((sum, bond) => sum + bond.ytm, 0) / list.length : null; }
+function carry(ytm, funding, price) {
+  const tax = 0.87;
+  const px = (price ?? 100) / 100;
+  return ((tax * (ytm / 100) * px + tax * (funding / 100) - 0.005) / (px + 0.1)) * 100;
+}
+function selected(sleeve) {
+  const map = new Map((board?.bonds || []).map((bond) => [bond.secid, bond]));
+  return picks[sleeve].map((id) => map.get(id)).filter(Boolean);
+}
+function model() {
+  if (!board) return null;
+  const rubBonds = selected("rub");
+  const usdBonds = selected("usd");
+  const cnyBonds = selected("cny");
+  const rubYtm = avg(rubBonds) ?? 13.2;
+  const usdAvg = avg(usdBonds);
+  const cnyAvg = avg(cnyBonds);
+  const usd = usdAvg === null ? 10.9 : carry(usdAvg, board.fundingUsd, usdBonds[0]?.price ?? 100);
+  const cny = cnyAvg === null ? 14.2 : carry(cnyAvg, board.fundingCny, cnyBonds[0]?.price ?? 100);
+  const hurdle = Math.max(board.lqdt, board.tmon);
+  const weights = { usd: 0.4, cny: 0.2, rub: 0.25, lqdt: 0.1, tmon: 0.05 };
+  if (usd < hurdle) { const cut = weights.usd * 0.5; weights.usd -= cut; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
+  if (cny < hurdle) { const cut = weights.cny * 0.5; weights.cny -= cut; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
+  const forecast = weights.usd * usd + weights.cny * cny + weights.rub * rubYtm + weights.lqdt * board.lqdt + weights.tmon * board.tmon;
+  return { rubYtm, usd, cny, weights, forecast };
+}
+function ring(parts) {
+  const data = parts.length ? parts : [{ name: "Пусто", value: 1, color: "#e6e8ec" }];
   const total = data.reduce((sum, item) => sum + item.value, 0) || 1;
   let angle = -Math.PI / 2;
   const arcs = data.map((item) => {
@@ -89,66 +129,106 @@ function ring(id, parts, empty) {
     const large = slice > Math.PI ? 1 : 0;
     const a = [Math.cos(start), Math.sin(start)];
     const b = [Math.cos(angle - 0.001), Math.sin(angle - 0.001)];
-    return `<path d="M ${50 + a[0]*32} ${50 + a[1]*32} A 32 32 0 ${large} 1 ${50 + b[0]*32} ${50 + b[1]*32}" stroke="${item.color || colors[item.name]}" stroke-width="16" fill="none"/>`;
+    return `<path d="M ${50 + a[0]*28} ${50 + a[1]*28} A 28 28 0 ${large} 1 ${50 + b[0]*28} ${50 + b[1]*28}" stroke="${item.color || colors[item.name]}" stroke-width="14" fill="none"/>`;
   }).join("");
-  svg.innerHTML = `<circle cx="50" cy="50" r="32" stroke="#e6e8ec" stroke-width="16" fill="none"/>${arcs}`;
+  document.querySelector("#ring").innerHTML = `<circle cx="50" cy="50" r="28" stroke="#e6e8ec" stroke-width="14" fill="none"/>${arcs}`;
 }
-
-function legend(parts) {
-  return parts.map((item) => `<div>${item.name} <strong>${item.value}%</strong></div>`).join("");
+function save() { localStorage.setItem("carry-picks", JSON.stringify(picks)); }
+function choose(sleeve, secid) {
+  if (!picks[sleeve].includes(secid)) picks[sleeve].push(secid);
+  save();
+  draw();
 }
-
-function draw(desk) {
-  document.querySelector("#forecast").textContent = desk.forecast.toFixed(1) + "%";
-  document.querySelector("#key").textContent = desk.keyRate.toFixed(0) + "%";
+function remove(sleeve, secid) {
+  picks[sleeve] = picks[sleeve].filter((id) => id !== secid);
+  save();
+  draw();
+}
+function sleeve(title, value, bonds, hint, name) {
+  return `<div class="sleeve"><div class="top"><h2>${title}</h2><div class="value">${value === null ? "—" : value.toFixed(1) + "%"}</div></div><div class="muted">${hint}</div><div class="chips">${bonds.map((bond) => `<button data-remove="${name}:${bond.secid}">${esc(bond.name)} ${bond.ytm.toFixed(1)}% ×</button>`).join("")}</div></div>`;
+}
+function draw() {
+  const current = model();
+  const groups = current ? [
+    { name: "Пары", value: Math.round((current.weights.usd + current.weights.cny) * 100) },
+    { name: "Фонды", value: Math.round((current.weights.lqdt + current.weights.tmon) * 100) },
+    { name: "Облигации", value: Math.round(current.weights.rub * 100) },
+  ] : [];
+  document.querySelector("#forecast").textContent = current ? current.forecast.toFixed(1) + "%" : "—";
   const gap = document.querySelector("#gap");
-  gap.textContent = (desk.gap > 0 ? "+" : "") + desk.gap.toFixed(1) + " п.п.";
-  gap.className = desk.gap < 0 ? "down" : "";
-  document.querySelector("#title").textContent = desk.account ? desk.account.name : "Портфель";
-  document.querySelector("#account").textContent = desk.account ? new Intl.NumberFormat("ru-RU").format(desk.account.total) + " ₽" : "Счёт не подключён";
-  const groups = ["Пары", "Фонды", "Облигации"].map((name) => ({ name, value: desk.plan.filter((row) => row.group === name).reduce((sum, row) => sum + row.share, 0) }));
-  ring("#planRing", groups);
-  document.querySelector("#planLegend").innerHTML = legend(groups);
-  const positions = desk.account?.positions || [];
-  const total = positions.reduce((sum, item) => sum + item.value, 0);
-  const fact = total ? positions.map((item) => ({ name: item.name, group: item.group, value: Math.round(item.value / total * 100) })) : [];
-  const factGroups = ["Пары", "Фонды", "Облигации"].map((name) => ({ name, value: fact.filter((row) => row.group === name).reduce((sum, row) => sum + row.value, 0) })).filter((item) => item.value);
-  ring("#factRing", factGroups, !factGroups.length);
-  document.querySelector("#factLegend").innerHTML = factGroups.length ? legend(factGroups) : "На счёте нет позиций";
-  document.querySelector("#meters").innerHTML = groups.map((item) => {
-    const hint = item.name === "Пары" ? `${desk.yields.usd.toFixed(1)}% и ${desk.yields.cny.toFixed(1)}%` : item.name === "Фонды" ? `LQDT ${desk.yields.lqdt.toFixed(1)}% · TMON ${desk.yields.tmon.toFixed(1)}%` : `ОФЗ ${desk.yields.ofz.toFixed(1)}%`;
-    return `<div class="meter"><div class="row"><strong>${item.name}</strong><strong>${item.value}%</strong></div><div class="bar"><span style="width:${item.value}%;background:${colors[item.name]}"></span></div><div class="muted">${hint}</div></div>`;
-  }).join("");
-  document.querySelector("#rows").innerHTML = desk.plan.map((row) => {
-    const actual = fact.find((item) => item.name === row.name);
-    return `<tr><td>${row.name}</td><td class="muted">${row.group}</td><td>${row.share}%</td><td>${actual ? actual.value + "%" : "—"}</td><td>${row.yield.toFixed(1)}%</td></tr>`;
-  }).join("");
-}
-
-async function load(launch) {
-  const note = document.querySelector("#note");
-  note.textContent = "Считаю…";
-  const response = await fetch("/api/desk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim() }) });
-  const desk = await response.json();
-  if (!response.ok || desk.error) {
-    note.textContent = desk.error || "Нет связи";
-    return;
+  if (current) {
+    const delta = current.forecast - 14;
+    gap.textContent = (delta >= 0 ? "+" : "") + delta.toFixed(1) + " п.п.";
+    gap.className = delta < 0 ? "down" : "";
   }
-  draw(desk);
-  note.textContent = (launch ? "Состав пересчитан. Заявки не отправлены. " : "") + desk.note;
+  ring(groups);
+  document.querySelector("#legend").innerHTML = groups.map((item) => `<div>${item.name} <strong>${item.value}%</strong></div>`).join("");
+  const rub = selected("rub");
+  const usd = selected("usd");
+  const cny = selected("cny");
+  document.querySelector("#sleeves").innerHTML = [
+    sleeve("Рублёвые", current ? current.rubYtm : null, rub, "доходность к погашению", "rub"),
+    sleeve("Пара доллар", current ? current.usd : null, usd, usd.length ? "облигация плюс шорт фьючерса" : "не выбрана, в расчёте 10,9%", "usd"),
+    sleeve("Пара юань", current ? current.cny : null, cny, cny.length ? "облигация плюс шорт фьючерса" : "не выбрана, в расчёте 14,2%", "cny"),
+  ].join("");
+  const labels = [["ОФЗ", "ОФЗ"], ["Корпоративная", "Корпоративные"], ["USD", "Доллар"], ["CNY", "Юань"]];
+  document.querySelector("#filters").innerHTML = labels.map(([id, label]) => `<button class="${filter === id ? "on" : ""}" data-filter="${id}">${label}</button>`).join("") + `<button data-risk>${risky ? "Скрыть рискованные" : "Показать рискованные"}</button>`;
+  const query = document.querySelector("#query").value.trim().toLowerCase();
+  const visible = (board?.bonds || []).filter((bond) => {
+    if (!risky && bond.risk === "повышенный") return false;
+    if (query && !`${bond.name} ${bond.secid}`.toLowerCase().includes(query)) return false;
+    if (filter === "ОФЗ") return bond.kind === "ОФЗ";
+    if (filter === "Корпоративная") return bond.kind === "Корпоративная";
+    if (filter === "USD") return bond.currency === "USD";
+    return bond.currency === "CNY";
+  }).slice(0, 40);
+  document.querySelector("#count").textContent = board ? `${visible.length} бумаг · ${new Date(board.updated).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}` : "";
+  document.querySelector("#rows").innerHTML = visible.map((bond) => {
+    const action = bond.currency === "USD" ? "usd:В пару $" : bond.currency === "CNY" ? "cny:В пару ¥" : "rub:В рублёвые";
+    const [sleeveName, label] = action.split(":");
+    return `<tr><td><strong>${esc(bond.name)}</strong><div class="muted">${esc(bond.kind)}${bond.risk === "повышенный" ? " · повышенный риск" : ""}</div></td><td><strong>${bond.ytm.toFixed(2)}%</strong>${bond.offerYield ? `<div class="muted">к оферте ${bond.offerYield.toFixed(1)}%</div>` : ""}</td><td>${bond.coupon === null ? "плавающий" : bond.coupon.toFixed(2) + "%"}${bond.couponYield ? `<div class="muted">текущая ${bond.couponYield.toFixed(1)}%</div>` : ""}</td><td>${esc(bond.frequency)}<div class="muted">${esc(bond.nextCoupon || "")}</div></td><td>${esc(bond.maturity || "нет даты")}</td><td>${bond.durationDays ? (bond.durationDays / 365).toFixed(1) + " г." : "—"}</td><td>${bond.price?.toFixed(2) ?? "—"}</td><td>${bond.turnover ? (bond.turnover / 1e6).toFixed(1) + " млн" : "—"}</td><td><button class="add" data-add="${sleeveName}:${bond.secid}">${label}</button></td></tr>`;
+  }).join("");
 }
-
+document.body.addEventListener("click", (event) => {
+  const filterButton = event.target.closest("[data-filter]");
+  const riskButton = event.target.closest("[data-risk]");
+  const add = event.target.closest("[data-add]");
+  const removeButton = event.target.closest("[data-remove]");
+  if (filterButton) { filter = filterButton.dataset.filter; draw(); }
+  if (riskButton) { risky = !risky; draw(); }
+  if (add) { const [sleeveName, secid] = add.dataset.add.split(":"); choose(sleeveName, secid); }
+  if (removeButton) { const [sleeveName, secid] = removeButton.dataset.remove.split(":"); remove(sleeveName, secid); }
+});
+document.querySelector("#query").addEventListener("input", draw);
+async function refresh(force) {
+  document.querySelector("#refresh").textContent = "Обновляю…";
+  document.querySelector("#note").textContent = "";
+  try {
+    const [market, account] = await Promise.all([
+      fetch("/api/bonds", { method: "POST" }).then((response) => response.json()),
+      fetch("/api/desk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim() }) }).then((response) => response.json()).catch(() => null),
+    ]);
+    board = market;
+    if (!picks.rub.length && !picks.usd.length && !picks.cny.length) {
+      const liquid = (market.bonds || []).filter((bond) => bond.kind === "ОФЗ" && bond.ytm >= 16 && bond.ytm <= 17 && bond.risk === "обычная").sort((a, b) => b.turnover - a.turnover)[0];
+      if (liquid) picks.rub = [liquid.secid];
+      save();
+    }
+    if (account?.account) document.querySelector("#title").textContent = account.account.name;
+    document.querySelector("#note").textContent = account?.note || account?.error || "";
+    draw();
+  } catch (error) {
+    document.querySelector("#note").textContent = error.message || "Нет связи с биржей";
+  } finally {
+    document.querySelector("#refresh").textContent = "Обновить с биржи";
+  }
+}
 document.querySelector("#form").addEventListener("submit", (event) => {
   event.preventDefault();
   localStorage.setItem("carry-token", tokenInput.value.trim());
-  load(false);
+  refresh(true);
 });
-document.querySelector("#launch").addEventListener("click", () => load(true));
-load(false);
-fetch("/api/bonds", { method: "POST" }).then((response) => response.json()).then((board) => {
-  const rows = (board.bonds || []).filter((bond) => bond.kind === "ОФЗ" && bond.risk === "обычная").slice(0, 12);
-  document.querySelector("#catalog").innerHTML = `<div class="note">Каталог с биржи. 13,2% была короткая ОФЗ 26232. Ниже доходность к погашению.</div><table><thead><tr><th>Бумага</th><th>К погашению</th><th>Купон</th><th>Выплаты</th><th>Погашение</th><th>Дюрация</th></tr></thead><tbody>${rows.map((bond) => `<tr><td>${bond.name}</td><td>${bond.ytm.toFixed(2)}%</td><td>${bond.coupon ?? "плавающий"}%</td><td>${bond.frequency}</td><td>${bond.maturity || "—"}</td><td>${bond.durationDays ? (bond.durationDays / 365).toFixed(1) + " г." : "—"}</td></tr>`).join("")}</tbody></table>`;
-}).catch(() => {});
+refresh(false);
 </script>
 </body>
 </html>
