@@ -385,6 +385,68 @@ async function trade(token, auto, sleeves, accountId) {
   let pairWaiting = false;
   const pairNeed = ordered.filter((sleeve) => rankOf(sleeve.name) === 0).reduce((sum, sleeve) => sum + (unmet.get(sleeve) || 0), 0);
   attempts.push({ sleeve: "Пары", title: "Пара", ticker: "", status: pairNeed > 1000 ? "добираю" : "набрано", detail: `Счёт для плана ${Math.round(total).toLocaleString("ru-RU")} ₽, свободно ${Math.round(budget).toLocaleString("ru-RU")} ₽, паре не хватает ${Math.round(pairNeed).toLocaleString("ru-RU")} ₽.`, why: pairNeed > budget + 1000 ? "Свободных рублей меньше, чем дыра в паре. Сначала продаю лишние фонды, затем лишние рублёвые облигации." : pairNeed > 1000 ? "Рублей на пару хватает. Другие корзины не покупаю, пока пара не собрана." : "Пара уже в плане, докупать её не нужно.", action: "Пара всегда первая. Если она не полная — это ещё не конец шага, а очередь." });
+  const quotes = new Map();
+  const loadQuote = async (ticker, query) => {
+    if (quotes.has(ticker)) return quotes.get(ticker);
+    try {
+    const { match, known } = await instrumentFor(cleaned, link.host, ticker, query || ticker);
+    if (!match) {
+      const empty = { match: null, known, lotCost: 0, notional: 0 };
+      quotes.set(ticker, empty);
+      return empty;
+    }
+    const price = Math.abs(await rublePrice(cleaned, link.host, match) || 0);
+    const lot = Number(match.lot || 1);
+    const knownUnit = Math.abs((qty.get(ticker) || 0) > 0 ? (owned.get(ticker) || 0) / qty.get(ticker) : 0);
+    const lotCost = knownUnit > 500 ? knownUnit * lot : price * lot;
+    const future = /F$/.test(ticker) || String(match.instrumentType || "").toLowerCase().includes("future");
+    const notional = future ? (price > 1000 ? price : price * 1000) : lotCost;
+    const row = { match, known, lotCost: Math.abs(lotCost), notional: Math.abs(notional) || Math.abs(lotCost) };
+    quotes.set(ticker, row);
+    return row;
+    } catch {
+      const empty = { match: null, known: false, lotCost: 0, notional: 0 };
+      quotes.set(ticker, empty);
+      return empty;
+    }
+  };
+  const lotPlan = new Map();
+  let bondSpend = 0;
+  let marginNeed = 0;
+  for (const sleeve of ordered.filter((item) => rankOf(item.name) === 0)) {
+    const gap = unmet.get(sleeve) || 0;
+    const rows = [];
+    for (const order of sleeve.orders) {
+      if (order.limit === 0 || order.limit === "0") continue;
+      const quote = await loadQuote(order.ticker, order.query);
+      if (quote.lotCost >= 500) rows.push({ order, quote });
+    }
+    const planned = rows.map((row) => {
+      const manual = row.order.limit !== undefined && row.order.limit !== null && row.order.limit !== "";
+      const share = manual ? Number(row.order.limit) : (rows.length ? gap / rows.length : 0);
+      return { ...row, lots: Math.max(0, Math.floor(share / row.quote.lotCost)) };
+    });
+    let leftover = gap - planned.reduce((sum, row) => sum + row.lots * row.quote.lotCost, 0);
+    for (const row of [...planned].sort((a, b) => a.quote.lotCost - b.quote.lotCost)) {
+      if (leftover < row.quote.lotCost) continue;
+      row.lots += 1;
+      leftover -= row.quote.lotCost;
+    }
+    const spend = planned.reduce((sum, row) => sum + row.lots * row.quote.lotCost, 0);
+    bondSpend += spend;
+    for (const row of planned) lotPlan.set(row.order.ticker, (lotPlan.get(row.order.ticker) || 0) + row.lots);
+    if (sleeve.hedge) {
+      const quote = await loadQuote(sleeve.hedge.ticker, sleeve.hedge.query);
+      const heldBonds = sleeve.orders.reduce((sum, order) => sum + (owned.get(order.ticker) || 0), 0);
+      const contract = quote.notional || 1;
+      const need = Math.max(0, Math.round((heldBonds + spend) / contract));
+      const add = Math.max(0, need - (shortQty.get(sleeve.hedge.ticker) || 0));
+      lotPlan.set(sleeve.hedge.ticker, add);
+      marginNeed += add * contract * 0.15;
+    }
+  }
+  const cashNeed = bondSpend + marginNeed;
+  attempts.push({ sleeve: "Расчёт", title: "Смета", ticker: "", status: "посчитано", detail: `Облигации пар целыми лотами ${Math.round(bondSpend).toLocaleString("ru-RU")} ₽, гарантийное обеспечение нового шорта ${Math.round(marginNeed).toLocaleString("ru-RU")} ₽. Вместе ${Math.round(cashNeed).toLocaleString("ru-RU")} ₽, свободно ${Math.round(budget).toLocaleString("ru-RU")} ₽.`, why: cashNeed > budget + 1000 ? `Не хватает ${Math.round(cashNeed - budget).toLocaleString("ru-RU")} ₽. Сначала продаю лишние фонды, потом рублёвые, ровно на эту сумму.` : "На лоты пар и на хедж свободных рублей хватает. Подушку не продаю.", action: "Дальше покупаются только лоты из этой сметы. Куски меньше лота не отправляются." });
   const resting = await openOrders(cleaned, link, account.id);
   const pairTickers = new Set(ordered.filter((sleeve) => rankOf(sleeve.name) === 0).flatMap((sleeve) => [...sleeve.orders.map((order) => order.ticker), sleeve.hedge?.ticker].filter(Boolean)));
   if (pairNeed > 1000) {
@@ -396,16 +458,16 @@ async function trade(token, auto, sleeves, accountId) {
       } catch { /* заявка уже не активна */ }
     }
   }
-  if (pairNeed > budget + 1000) {
+  if (cashNeed > budget + 1000) {
     const donors = ordered.filter((sleeve) => rankOf(sleeve.name) > 0).sort((a, b) => rankOf(b.name) - rankOf(a.name));
     for (const sleeve of donors) {
-      if (pairNeed <= budget + 1000) break;
+      if (cashNeed <= budget + 1000) break;
       const targetValue = total * Number(sleeve.weight);
       let have = sleeve.orders.reduce((sum, order) => sum + (owned.get(order.ticker) || 0), 0);
       let room = Math.max(0, have - targetValue);
       if (pairNeed > budget + room + 1000) room = have;
       for (const order of sleeve.orders) {
-        if (room < 1000 || pairNeed <= budget + 1000) break;
+        if (room < 1000 || cashNeed <= budget + 1000) break;
         const heldValue = owned.get(order.ticker) || 0;
         if (heldValue < 1000) continue;
         try {
@@ -414,7 +476,7 @@ async function trade(token, auto, sleeves, accountId) {
           const price = await rublePrice(cleaned, link.host, match);
           const lot = Number(match.lot || 1);
           const lotCost = price * lot;
-          const cut = Math.min(heldValue, room, Math.max(0, pairNeed - budget));
+          const cut = Math.min(heldValue, room, Math.max(0, cashNeed - budget));
           const lots = lotCost >= 1 ? Math.min(50000, Math.floor(cut / lotCost)) : 1;
           if (lots < 1) continue;
           await tbank(cleaned, link.host, link.sandbox ? "SandboxService" : "OrdersService", link.sandbox ? "PostSandboxOrder" : "PostOrder", {
@@ -487,9 +549,10 @@ async function trade(token, auto, sleeves, accountId) {
         const knownUnit = Math.abs((qty.get(order.ticker) || 0) > 0 ? (owned.get(order.ticker) || 0) / qty.get(order.ticker) : 0);
         let lotCost = knownUnit > 500 ? knownUnit * lot : Math.abs(price) * lot;
         const bond = String(match.instrumentType || "").toLowerCase().includes("bond");
-        const room = Math.min(budget, Math.max(0, deficit - spentSleeve));
-        let lots = !lotCost || lotCost < 0.5 ? 0 : Math.min(50000, Math.floor(Math.min(Math.max(share, 0), budget) / lotCost));
-        if (lots < 1 && lotCost >= 500 && room >= lotCost) lots = 1;
+        const room = Math.min(Math.max(0, budget - (rank === 0 ? marginNeed : 0)), Math.max(0, deficit - spentSleeve));
+        let lots = !lotCost || lotCost < 0.5 ? 0 : Math.min(50000, Math.floor(Math.min(Math.max(share, 0), room) / lotCost));
+        if (rank === 0 && lotPlan.has(order.ticker)) lots = lotCost >= 1 ? Math.min(lotPlan.get(order.ticker) || 0, Math.floor(room / lotCost)) : 0;
+        if (lots < 1 && lotCost >= 500 && room >= lotCost && rank !== 0) lots = 1;
         if (bond && (!lotCost || lotCost < 500)) {
           lots = room >= 1000 ? 1 : 0;
           lotCost = Math.max(lotCost, 0);
