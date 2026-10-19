@@ -377,21 +377,32 @@ function model() {
   const cnyAvg = avg(cnyBonds);
   const usd = usdAvg === null ? null : carry(usdAvg, board.fundingUsd, usdBonds[0]?.price ?? 100);
   const cny = cnyAvg === null ? null : carry(cnyAvg, board.fundingCny, cnyBonds[0]?.price ?? 100);
-  const hurdle = Math.max(board.lqdt, board.tmon);
+  const key = board.keyRate || 14;
   const weights = { usd: 0.4, cny: 0.2, rub: 0.25, lqdt: 0.1, tmon: 0.05 };
-  const release = (key) => {
-    const cut = weights[key];
-    weights[key] = 0;
-    if (key !== "rub" && rubYtm !== null) { weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
+  const reasons = [];
+  const release = (keyName) => {
+    const cut = weights[keyName];
+    weights[keyName] = 0;
+    if (keyName !== "rub" && rubYtm !== null) weights.rub += cut;
     else weights.lqdt += cut;
   };
+  const trim = (keyName, yieldValue, title) => {
+    if (yieldValue === null || yieldValue >= key) return;
+    const floor = 0.15;
+    const cut = Math.max(0, weights[keyName] - floor);
+    if (cut < 0.01) return;
+    weights[keyName] -= cut;
+    if (rubYtm !== null) weights.rub += cut;
+    else weights.lqdt += cut;
+    reasons.push(title + " " + yieldValue.toFixed(1) + "% ниже ключевой " + key + "%. В паре оставлено " + Math.round(weights[keyName] * 100) + "%, остальное перенесено в ОФЗ.");
+  };
   if (excluded.usd || usd === null) release("usd");
-  else if (positionHeld(usdBonds.map((bond) => bond.secid).concat("USDRUBF")) && usd < hurdle - 3) { const cut = weights.usd * 0.5; weights.usd -= cut; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
+  else trim("usd", usd, "Доллар");
   if (excluded.cny || cny === null) release("cny");
-  else if (positionHeld(cnyBonds.map((bond) => bond.secid).concat("CNYRUBF")) && cny < hurdle - 3) { const cut = weights.cny * 0.5; weights.cny -= cut; weights.rub += cut * 0.6; weights.lqdt += cut * 0.4; }
+  else trim("cny", cny, "Юань");
   if (rubYtm === null) release("rub");
   const forecast = weights.usd * (usd || 0) + weights.cny * (cny || 0) + weights.rub * (rubYtm || 0) + weights.lqdt * board.lqdt + weights.tmon * board.tmon;
-  return { rubYtm, usd, cny, fundingUsd: board.fundingUsd, fundingCny: board.fundingCny, weights, forecast };
+  return { rubYtm, usd, cny, fundingUsd: board.fundingUsd, fundingCny: board.fundingCny, weights, forecast, reasons };
 }
 function splitPercent(rows) {
   const base = rows.reduce((sum, row) => sum + Math.max(0, Number(row.amount) || 0), 0);
@@ -514,12 +525,12 @@ function draw() {
     node.classList.toggle("win", win);
     node.classList.toggle("lose", lose);
   };
-  mark("#forecastCard", beatsKey && beatsCredit, Boolean(current) && (!beatsKey || !beatsCredit));
+  mark("#forecastCard", beatsKey, Boolean(current) && !beatsKey);
   mark("#keyCard", beatsKey, Boolean(current) && !beatsKey);
   mark("#creditCard", beatsCredit, Boolean(current) && !beatsCredit);
   mark("#gapCard", Boolean(current) && current.forecast > 14, Boolean(current) && current.forecast < 14);
   document.querySelector("#status").textContent = active ? "Работает" : "Остановлена";
-  document.querySelector("#subtitle").textContent = active ? "Стратегия запущена и следит за доходностью корзин" : "Стратегия остановлена. Запуск — жёлтой кнопкой";
+  document.querySelector("#subtitle").textContent = (active ? "Стратегия запущена и следит за доходностью корзин." : "Стратегия остановлена. Запуск — жёлтой кнопкой.") + (current?.reasons?.length ? " " + current.reasons.join(" ") : " Надёжные облигации не дотягивают до кредитных 30%: цель скрипта — обогнать ключевую ставку.");
   const toggle = document.querySelector("#toggle");
   toggle.textContent = active ? "Остановить" : "Запустить стратегию";
   toggle.classList.toggle("add", !active);

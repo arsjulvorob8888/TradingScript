@@ -82,14 +82,15 @@ async function bondYield(secid) {
 async function market() {
   const data = { ...FALLBACK };
   try {
-    const [lqdt, tmon, usd, cny, ofz] = await Promise.all([
-      annualized("LQDT"), annualized("TMON"), funding("USDRUBF"), funding("CNYRUBF"), bondYield("SU26232RMFS7"),
+    const [lqdt, tmon, usd, cny, ofzMain, ofzSecond] = await Promise.all([
+      annualized("LQDT"), annualized("TMON"), funding("USDRUBF"), funding("CNYRUBF"), bondYield("SU26245RMFS9"), bondYield("SU29028RMFS6"),
     ]);
     if (lqdt) data.lqdt = lqdt;
     if (tmon) data.tmon = tmon;
     if (usd != null) data.usdFunding = usd;
     if (cny != null) data.cnyFunding = cny;
-    if (ofz) data.ofz = ofz;
+    const ofz = [ofzMain, ofzSecond].filter((item) => item > 0);
+    if (ofz.length) data.ofz = ofz.reduce((sum, item) => sum + item, 0) / ofz.length;
     return { data, source: "Мосбиржа, последние сессии" };
   } catch {
     return { data, source: "снимок 16 октября 2026" };
@@ -107,7 +108,7 @@ function planFrom(marketData) {
     plan: [
       { name: "Пара доллар", group: "Пары", share: Math.round(weights.usd * 100), yield: round1(usd) },
       { name: "Пара юань", group: "Пары", share: Math.round(weights.cny * 100), yield: round1(cny) },
-      { name: "ОФЗ 26232", group: "Облигации", share: Math.round(weights.rub * 100), yield: round1(marketData.ofz) },
+      { name: "Рублёвые ОФЗ", group: "Облигации", share: Math.round(weights.rub * 100), yield: round1(marketData.ofz) },
       { name: "LQDT", group: "Фонды", share: Math.round(weights.lqdt * 100), yield: round1(marketData.lqdt) },
       { name: "TMON", group: "Фонды", share: Math.round(weights.tmon * 100), yield: round1(marketData.tmon) },
     ],
@@ -502,6 +503,42 @@ async function trade(token, auto, sleeves, accountId) {
     }
   }
   for (const sleeve of ordered) {
+    const targetValue = total * Number(sleeve.weight);
+    let excess = sleeve.orders.reduce((sum, order) => sum + (owned.get(order.ticker) || 0), 0) - targetValue;
+    if (excess < 8000) continue;
+    for (const order of sleeve.orders) {
+      if (excess < 8000) break;
+      const heldValue = owned.get(order.ticker) || 0;
+      if (heldValue < 1000) continue;
+      try {
+        const { match } = await instrumentFor(cleaned, link.host, order.ticker, order.query);
+        if (!match) continue;
+        const price = Math.abs(await rublePrice(cleaned, link.host, match) || 0);
+        const lot = Number(match.lot || 1);
+        const lotCost = price * lot;
+        if (lotCost < 500) continue;
+        const lots = Math.min(50000, Math.floor(Math.min(heldValue, excess) / lotCost));
+        if (lots < 1) continue;
+        await tbank(cleaned, link.host, link.sandbox ? "SandboxService" : "OrdersService", link.sandbox ? "PostSandboxOrder" : "PostOrder", {
+          quantity: String(lots),
+          direction: "ORDER_DIRECTION_SELL",
+          accountId: account.id,
+          orderType: "ORDER_TYPE_MARKET",
+          orderId: crypto.randomUUID(),
+          instrumentId: match.uid || match.figi,
+        });
+        const proceeds = lots * lotCost;
+        budget += proceeds * 0.98;
+        owned.set(order.ticker, Math.max(0, heldValue - proceeds));
+        excess -= proceeds;
+        attempts.push({ sleeve: sleeve.name, title: order.title || sleeve.name, ticker: order.ticker, status: "продана", detail: `Продано ${lots} лот. на ~${Math.round(proceeds).toLocaleString("ru-RU")} ₽: доля стала выше плана.`, why: "Пара слабее ключевой ставки, лишняя часть уходит в более доходные ОФЗ.", action: "Ничего делать не нужно." });
+      } catch (error) {
+        const failure = explainFailure(error instanceof Error ? error.message : "ошибка продажи");
+        attempts.push({ sleeve: sleeve.name, title: order.title || sleeve.name, ticker: order.ticker, status: failure.status, detail: failure.detail, why: "Нужно уменьшить долю, которая выше плана.", action: failure.action });
+      }
+    }
+  }
+  for (const sleeve of ordered) {
     const rank = rankOf(sleeve.name);
     const target = total * Number(sleeve.weight);
     const have = sleeve.orders.reduce((sum, order) => sum + (owned.get(order.ticker) || 0), 0);
@@ -594,7 +631,19 @@ async function trade(token, auto, sleeves, accountId) {
           const notional = futurePrice > 1000 ? futurePrice : futurePrice * 1000;
           const need = Math.max(1, Math.round((have + spentSleeve) / Math.max(notional, 1)));
           const add = need - (shortQty.get(sleeve.hedge.ticker) || 0);
-          if (add < 1) {
+          if (add <= -1) {
+            const close = -add;
+            const posted = await tbank(cleaned, link.host, link.sandbox ? "SandboxService" : "OrdersService", link.sandbox ? "PostSandboxOrder" : "PostOrder", {
+              quantity: String(close),
+              direction: "ORDER_DIRECTION_BUY",
+              accountId: account.id,
+              orderType: "ORDER_TYPE_MARKET",
+              orderId: crypto.randomUUID(),
+              instrumentId: match.uid || match.figi,
+            });
+            const status = String(posted.executionReportStatus || "");
+            attempts.push({ sleeve: sleeve.name, title: sleeve.hedge.title, ticker: sleeve.hedge.ticker, status: status.includes("FILL") ? "сокращён" : "выставлена", detail: `Закрыто ${close} контр. шорта: объём фьючерса был больше облигаций.`, why: "После продажи лишних облигаций хедж нужно вернуть к их сумме.", action: "Ничего делать не нужно." });
+          } else if (add < 1) {
             attempts.push({ sleeve: sleeve.name, title: sleeve.hedge.title, ticker: sleeve.hedge.ticker, status: "набрано", detail: "Шорт уже покрывает купленные облигации.", action: "Ничего делать не нужно." });
           } else {
             const posted = await tbank(cleaned, link.host, link.sandbox ? "SandboxService" : "OrdersService", link.sandbox ? "PostSandboxOrder" : "PostOrder", {
