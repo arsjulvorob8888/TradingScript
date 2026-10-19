@@ -357,18 +357,36 @@ function ring(id, parts) {
   node.setAttribute("viewBox", "0 0 100 100");
   node.innerHTML = `<circle cx="50" cy="50" r="30" stroke="#e6e8ec" stroke-width="12" fill="none"/>${arcs}`;
 }
-function pairShape(title, move) {
-  const tickers = title === "Доллар" ? selected("usd").map((bond) => bond.secid).concat("USDRUBF") : selected("cny").map((bond) => bond.secid).concat("CNYRUBF");
-  const held = positionHeld(tickers);
-  const strong = held && Math.abs(move) >= 5;
-  let bond = 50;
+function pairShape(title) {
+  const future = title === "Доллар" ? "USDRUBF" : "CNYRUBF";
+  const bonds = (title === "Доллар" ? selected("usd") : selected("cny")).map((bond) => bond.secid);
+  const positions = accountState?.account?.positions || [];
+  const hedge = positions.find((item) => item.ticker === future);
+  const bond = positions.find((item) => bonds.includes(item.ticker));
+  const held = positionHeld(bonds.concat(future));
+  const quote = hedge && hedge.average > 0 ? hedge : bond;
+  const entry = Number(quote?.average) || 0;
+  const now = Number(quote?.price) || 0;
+  const move = entry > 0 ? (now / entry - 1) * 100 : 0;
+  const opened = hedge?.opened || bond?.opened || null;
+  const days = opened ? Math.max(0, (Date.now() - Date.parse(opened)) / 86400000) : 0;
+  const ripe = held && days >= 20 && entry > 0;
+  const strong = ripe && Math.abs(move) >= 5;
+  let bondShare = 50;
   if (strong) {
     const tilt = Math.min(25, Math.round(Math.abs(move)));
-    bond = move < 0 ? 50 + tilt : 50 - tilt;
+    bondShare = move < 0 ? 50 + tilt : 50 - tilt;
   }
-  const moveText = held ? `${move > 0 ? "+" : ""}${move.toFixed(1)}% за 3 месяца` : "позиция не куплена, цену не ведём";
-  const reason = !held ? "ровно 50/50, перераспределение выключено" : strong ? (move < 0 ? "валюта подешевела больше чем на 5% — больше облигаций" : "валюта подорожала больше чем на 5% — больше шорт") : "ровно: за 3 месяца нет движения от 5%";
-  return { title, bond, short: 100 - bond, active: strong, moveText, reason };
+  const dateText = opened ? new Date(opened).toLocaleDateString("ru-RU") : "";
+  const moveText = !held ? "позиция не куплена" : `от цены покупки ${move > 0 ? "+" : ""}${move.toFixed(1)}%${dateText ? ", с " + dateText : ""}`;
+  const reason = !held
+    ? "ровно 50/50, перераспределение выключено"
+    : !ripe
+      ? `куплено ${dateText || "только что"}, ${Math.floor(days)} дн. До 20 дней остаёмся в безопасных 50/50`
+      : strong
+        ? (move < 0 ? "с покупки валюта подешевела больше чем на 5% — больше облигаций" : "с покупки валюта подорожала больше чем на 5% — больше шорт")
+        : "от цены покупки нет движения на 5%. Возвращаемся к 50/50";
+  return { title, bond: bondShare, short: 100 - bondShare, active: strong, moveText, reason };
 }
 function save() { localStorage.setItem("carry-picks", JSON.stringify(picks)); syncState(); }
 function saveExcluded() { localStorage.setItem("carry-excluded", JSON.stringify(excluded)); }
@@ -488,8 +506,8 @@ function draw() {
     return '<button type="button" class="sleeve' + (openCategory === name ? " open" : "") + '" data-open="' + name + '"><h2>' + name + '</h2><div class="compare"><div><span class="muted">План</span><strong>' + plan + '%</strong></div><div><span class="muted">Факт</span><strong>' + fact + '%</strong></div></div><div class="muted">' + hints[name] + '</div></button>';
   }).join("");
   const mixes = [
-    pairShape("Доллар", board?.usdMove || 0),
-    pairShape("Юань", board?.cnyMove || 0),
+    pairShape("Доллар"),
+    pairShape("Юань"),
   ];
   document.querySelector("#pairMix").innerHTML = mixes.map((item, index) => `<div class="pair-card"><svg id="mix${index}"></svg><h3>${item.title}</h3><div class="${item.active ? "shift" : "muted"}">${item.active ? "Перераспределение" : "Ровно"}</div><div class="muted">${item.bond}% облигация · ${item.short}% шорт</div><div class="muted">${item.moveText}. ${item.reason}</div></div>`).join("");
   mixes.forEach((item, index) => ring("#mix" + index, [{ name: "Облигация", value: item.bond }, { name: "Шорт", value: item.short }]));
@@ -590,7 +608,7 @@ function draw() {
   const orders = accountState?.orders || [];
   document.querySelector("#liveOrders").innerHTML = orders.length ? orders.map((item) => `<tr><td>${esc(item.ticker)}</td><td>${esc(item.direction)}</td><td>${item.lots}</td><td>${item.done}</td><td>${esc(String(item.status).replace("EXECUTION_REPORT_STATUS_", ""))}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">Открытых заявок нет</td></tr>`;
   const ops = accountState?.operations || [];
-  document.querySelector("#operations").innerHTML = ops.length ? ops.map((item) => `<tr><td>${esc((item.date || "").replace("T", " ").slice(0, 16))}</td><td>${esc(item.type)}</td><td>${esc(item.name)}</td><td>${item.quantity || "—"}</td><td>${item.payment ? Math.round(item.payment).toLocaleString("ru-RU") + " ₽" : "—"}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">Операций за 30 дней нет</td></tr>`;
+  document.querySelector("#operations").innerHTML = ops.length ? ops.slice(0, 30).map((item) => `<tr><td>${esc((item.date || "").replace("T", " ").slice(0, 16))}</td><td>${esc(item.type)}</td><td>${esc(item.name)}</td><td>${item.quantity || "—"}</td><td>${item.payment ? Math.round(item.payment).toLocaleString("ru-RU") + " ₽" : "—"}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">Операций за 30 дней нет</td></tr>`;
   renderProgress(moneyText);
 }
 function renderCategory() {

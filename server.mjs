@@ -239,6 +239,19 @@ async function desk(token, accountId) {
     }
   }
   result.operations = await operations(cleaned, link, account.id);
+  if (!memory.opened || typeof memory.opened !== "object") memory.opened = {};
+  for (const op of result.operations) {
+    if (!op.ticker || !op.date || !/Покупка|Продажа/.test(op.type)) continue;
+    const prev = memory.opened[op.ticker];
+    if (!prev || Date.parse(op.date) < Date.parse(prev)) memory.opened[op.ticker] = op.date;
+  }
+  const live = new Set(traded.map((item) => item.ticker));
+  for (const ticker of Object.keys(memory.opened)) if (!live.has(ticker)) delete memory.opened[ticker];
+  for (const item of traded) {
+    if (!memory.opened[item.ticker]) memory.opened[item.ticker] = new Date().toISOString();
+    item.opened = memory.opened[item.ticker];
+  }
+  await storeState();
   result.orders = await openOrders(cleaned, link, account.id);
   result.sandbox = link.sandbox;
   result.note = link.sandbox ? "Подключена песочница." : "Подключён боевой счёт.";
@@ -248,15 +261,16 @@ async function desk(token, accountId) {
 async function operations(token, link, accountId) {
   try {
     const to = new Date().toISOString();
-    const from = new Date(Date.now() - 30 * 86400000).toISOString();
+    const from = new Date(Date.now() - 120 * 86400000).toISOString();
     const method = link.sandbox ? "GetSandboxOperations" : "GetOperations";
     const service = link.sandbox ? "SandboxService" : "OperationsService";
     const payload = await tbank(token, link.host, service, method, { accountId, from, to });
-    return (payload.operations || []).slice(0, 30).map((item) => ({
+    return (payload.operations || []).map((item) => ({
       date: item.date,
       type: operationName(item.operationType || item.type),
       name: item.name || item.figi || "Операция",
       payment: money(item.payment),
+      ticker: item.ticker || "",
       quantity: money(item.quantity),
     }));
   } catch {
@@ -495,7 +509,7 @@ async function loadState() {
 
 async function storeState() {
   await mkdir(join(ROOT, "data"), { recursive: true });
-  await writeFile(STATE_PATH, JSON.stringify({ token: memory.token, accountId: memory.accountId, active: memory.active, auto: memory.auto, sleeves: memory.sleeves, updated: memory.updated }));
+  await writeFile(STATE_PATH, JSON.stringify({ token: memory.token, accountId: memory.accountId, active: memory.active, auto: memory.auto, sleeves: memory.sleeves, opened: memory.opened || {}, updated: memory.updated }));
 }
 
 function readBody(req) {
