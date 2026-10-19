@@ -367,6 +367,16 @@ function model() {
   const forecast = weights.usd * (usd || 0) + weights.cny * (cny || 0) + weights.rub * (rubYtm || 0) + weights.lqdt * board.lqdt + weights.tmon * board.tmon;
   return { rubYtm, usd, cny, fundingUsd: board.fundingUsd, fundingCny: board.fundingCny, weights, forecast };
 }
+function splitPercent(rows) {
+  const base = rows.reduce((sum, row) => sum + Math.max(0, Number(row.amount) || 0), 0);
+  const out = rows.map((row) => ({ ...row, value: base ? Math.round(Math.max(0, row.amount) / base * 1000) / 10 : 0 }));
+  const drift = Math.round((100 - out.reduce((sum, row) => sum + row.value, 0)) * 10) / 10;
+  if (out.length && Math.abs(drift) >= 0.1) {
+    const host = out.reduce((best, row) => row.amount >= best.amount ? row : best);
+    host.value = Math.round((host.value + drift) * 10) / 10;
+  }
+  return out;
+}
 function ring(id, parts) {
   const data = parts.filter((item) => item.value > 0);
   const rows = data.length ? data : [{ name: "Пусто", value: 1, color: "#e6e8ec" }];
@@ -507,18 +517,11 @@ function draw() {
     gap.className = delta < 0 ? "down" : "";
   }
   ring("#ring", groups);
-  const held = accountState?.account?.positions || [];
-  const factBuckets = { "Пары": 0, "Фонды": 0, "Рублёвые облигации": 0 };
-  held.forEach((item) => {
-    if (String(item.ticker || "").endsWith("UTSTOM") || item.group === "Деньги" || item.group === "Рубли") return;
-    const name = sleeveOf(item);
-    if (factBuckets[name] !== undefined) factBuckets[name] += item.value;
-  });
-  const cashRows = held.filter((item) => String(item.ticker || "").endsWith("UTSTOM") || item.group === "Деньги" || item.group === "Рубли").reduce((sum, item) => sum + item.value, 0);
-  const cash = accountState?.account?.cash || cashRows;
-  const factBase = accountState?.account?.total || factBuckets["Пары"] + factBuckets["Фонды"] + factBuckets["Рублёвые облигации"] + cash || 1;
-  const factGroups = ["Пары", "Фонды", "Рублёвые облигации"].map((name) => ({ name, value: Math.round(factBuckets[name] / factBase * 100) }));
-  factGroups.push({ name: "Рубли", value: Math.round(cash / factBase * 100) });
+  const held = (accountState?.account?.positions || []).filter((item) => !String(item.ticker || "").endsWith("UTSTOM") && item.group !== "Деньги" && item.group !== "Рубли");
+  const cashAmount = accountState?.account?.cash || 0;
+  const shareRows = splitPercent(held.map((item) => ({ ...item, amount: item.value })).concat([{ cash: true, amount: cashAmount, name: "Рубли" }]));
+  const factOf = (name) => Math.round(shareRows.filter((item) => (item.cash ? "Рубли" : sleeveOf(item)) === name).reduce((sum, item) => sum + item.value, 0) * 10) / 10;
+  const factGroups = ["Пары", "Фонды", "Рублёвые облигации", "Рубли"].map((name) => ({ name, value: factOf(name) }));
   ring("#ringFact", factGroups);
   const hints = {
     "Пары": current ? "доллар " + (current.usd == null ? "нет бумаги" : current.usd.toFixed(1) + "%") + " · юань " + (current.cny == null ? "нет бумаги" : current.cny.toFixed(1) + "%") : "",
@@ -531,7 +534,7 @@ function draw() {
     const factItem = factGroups.find((item) => item.name === name);
     const plan = planItem ? planItem.value : 0;
     const fact = factItem ? factItem.value : 0;
-    return '<button type="button" class="sleeve' + (openCategory === name ? " open" : "") + '" data-open="' + name + '"><h2>' + name + '</h2><div class="compare"><div><span class="muted">План</span><strong>' + plan + '%</strong></div><div><span class="muted">Факт</span><strong>' + fact + '%</strong></div></div><div class="muted">' + hints[name] + '</div></button>';
+    return '<button type="button" class="sleeve' + (openCategory === name ? " open" : "") + '" data-open="' + name + '"><h2>' + name + '</h2><div class="compare"><div><span class="muted">План</span><strong>' + plan + '%</strong></div><div><span class="muted">Факт</span><strong>' + fact.toFixed(1).replace(".", ",") + '%</strong></div></div><div class="muted">' + hints[name] + '</div></button>';
   }).join("");
   const mixes = [
     pairShape("Доллар"),
@@ -617,10 +620,11 @@ function draw() {
     picker.value = account?.id || accounts[0].id;
   }
   const positions = account?.positions || [];
-  const total = positions.reduce((sum, item) => sum + item.value, 0) || account?.total || 0;
-  const instruments = Math.max(0, (account?.total || 0) - (account?.cash || 0));
-  document.querySelector("#accountSum").textContent = account ? moneyText(account.total) : "—";
-  document.querySelector("#accountSumDetail").textContent = account ? "Рубли " + moneyText(account.cash) + " + инструменты " + moneyText(instruments) + " = весь счёт " + moneyText(account.total) : "Счёт ещё не загружен";
+  const book = positions.reduce((sum, item) => sum + item.value, 0);
+  const accounted = book + (account?.cash || 0);
+  const instruments = book;
+  document.querySelector("#accountSum").textContent = account ? moneyText(accounted || account.total) : "—";
+  document.querySelector("#accountSumDetail").textContent = account ? "Рубли " + moneyText(account.cash) + " + инструменты " + moneyText(instruments) + " = весь счёт " + moneyText(accounted || account.total) + (Math.abs((account.total || 0) - accounted) > 1 ? ". По брокеру " + moneyText(account.total) : "") : "Счёт ещё не загружен";
   const qtyText = (value) => {
     const abs = Math.abs(value);
     const text = abs >= 100 ? Math.round(abs).toLocaleString("ru-RU") : abs.toFixed(2).replace(/\.00$/, "");
@@ -632,7 +636,12 @@ function draw() {
   document.querySelector("#foldAccount").classList.toggle("shut", !accountOpen);
   renderCategory();
   const rowOf = (item, share) => `<tr><td><strong>${esc(item.name)}</strong><div class="muted">${esc(item.ticker || "")}</div></td><td>${esc(roleOf(item))}</td><td>${item.quantity.toFixed(2)}</td><td>${item.price ? item.price.toFixed(2) : "—"}</td><td>${Math.round(item.value).toLocaleString("ru-RU")} ₽</td>${share}</tr>`;
-  document.querySelector("#strategyPositions").innerHTML = (positions.map((item) => rowOf(item, `<td>${total ? (item.value / total * 100).toFixed(1) : "0"}%</td>`)).join("") + (account ? `<tr><td><strong>Рубли</strong><div class="muted">свободно</div></td><td>Рубли</td><td>${Number(account.cash || 0).toLocaleString("ru-RU")}</td><td>1.00</td><td>${moneyText(account.cash)}</td><td>${account.total ? (account.cash / account.total * 100).toFixed(1) : "0"}%</td></tr>` : "")) || `<tr><td colspan="6" class="muted">Позиций нет.</td></tr>`;
+  const rowShare = (item) => {
+    const row = shareRows.find((entry) => !entry.cash && entry.ticker === item.ticker && entry.amount === item.value);
+    return (row ? row.value : 0).toFixed(1).replace(".", ",") + "%";
+  };
+  const cashShare = (shareRows.find((entry) => entry.cash)?.value || 0).toFixed(1).replace(".", ",") + "%";
+  document.querySelector("#strategyPositions").innerHTML = (positions.map((item) => rowOf(item, `<td>${rowShare(item)}</td>`)).join("") + (account ? `<tr><td><strong>Рубли</strong><div class="muted">свободно</div></td><td>Рубли</td><td>${Number(account.cash || 0).toLocaleString("ru-RU")}</td><td>1.00</td><td>${moneyText(account.cash)}</td><td>${cashShare}</td></tr>` : "")) || `<tr><td colspan="6" class="muted">Позиций нет.</td></tr>`;
   const orders = accountState?.orders || [];
   document.querySelector("#liveOrders").innerHTML = orders.length ? orders.map((item) => `<tr><td>${esc(item.ticker)}</td><td>${esc(item.direction)}</td><td>${item.lots}</td><td>${item.done}</td><td>${esc(String(item.status).replace("EXECUTION_REPORT_STATUS_", ""))}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">Открытых заявок нет</td></tr>`;
   const ops = accountState?.operations || [];
@@ -673,8 +682,8 @@ function sessionNow() {
 function renderProgress(moneyText) {
   const current = model();
   const account = accountState?.account;
-  const total = account?.total || 0;
   const positions = account?.positions || [];
+  const total = positions.reduce((sum, item) => sum + item.value, 0) + (account?.cash || 0) || account?.total || 0;
   const session = sessionNow();
   const valueOf = (tickers) => positions.filter((item) => tickers.includes(item.ticker)).reduce((sum, item) => sum + item.value, 0);
   const lanes = [
