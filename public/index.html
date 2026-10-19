@@ -335,8 +335,8 @@ function roleOf(item) {
   const sleeve = sleeveOf(item);
   if (sleeve !== "Пары") return sleeve;
   const ticker = String(item.ticker || "");
-  if (ticker === "USDRUBF" || ticker === "CNYRUBF" || Number(item.quantity) < 0) return "Пара — шорт фьюча";
-  return "Пара — вал. облигация";
+  if (ticker === "USDRUBF" || ticker === "CNYRUBF" || Number(item.quantity) < 0) return "Пара-шорт фьюча";
+  return "Пара-вал.облигация";
 }
 function positionHeld(tickers) {
   return (accountState?.account?.positions || []).some((item) => tickers.includes(item.ticker) && Math.abs(item.value) > 1000);
@@ -666,7 +666,7 @@ function renderCategory() {
   if (openCategory === "Рубли") plan = "Свободные рубли не входят в заявки. Это резерв, из которого набираются остальные категории.";
   const cashLine = openCategory === "Рубли" ? '<div class="balance">' + money(accountState?.account?.cash || 0) + '</div>' : "";
   const chosen = openCategory === "Пары" ? selected("usd").concat(selected("cny")) : openCategory === "Рублёвые облигации" ? selected("rub") : [];
-  const chosenHtml = chosen.length ? '<div class="muted">В стратегии: ' + chosen.map((bond) => esc(bond.name) + " " + bond.ytm.toFixed(1) + "%").join(", ") + '</div>' : "";
+  const chosenHtml = chosen.length ? '<div class="muted">В стратегии: ' + chosen.map((bond) => (openCategory === "Пары" ? "Пара-вал.облигация · " : "") + esc(bond.name) + " " + bond.ytm.toFixed(1) + "%").join(", ") + '</div>' : "";
   box.innerHTML = '<div class="top"><h2>' + openCategory + '</h2><button type="button" id="closeCategory">Свернуть</button></div>' + cashLine + '<p>' + plan + '</p>' + chosenHtml + heldHtml;
 }
 function sessionNow() {
@@ -738,9 +738,9 @@ function renderProgress(moneyText) {
     const names = positions.filter((item) => lane.tickers.includes(item.ticker)).map((item) => roleOf(item) + " " + item.ticker + " " + moneyText(item.value));
     const bondValue = valueOf(selected("usd").concat(selected("cny")).map((bond) => bond.secid));
     const hedgeValue = valueOf(["USDRUBF", "CNYRUBF"]);
-    const pairSplit = lane.name === "Пары" ? '<div class="' + (bondValue < 1000 ? "down" : "muted") + '">Валютные облигации ' + moneyText(bondValue) + " · шорт фьючерса " + moneyText(hedgeValue) + (bondValue < 1000 ? ". Облигации пары ещё не куплены." : "") + "</div>" : "";
+    const pairSplit = lane.name === "Пары" ? '<div class="' + (bondValue < 1000 ? "down" : "muted") + '">Пара-вал.облигация ' + moneyText(bondValue) + " · Пара-шорт фьюча " + moneyText(hedgeValue) + (bondValue < 1000 ? ". Облигации пары ещё не куплены." : "") + "</div>" : "";
     const editorItems = lane.name === "Пары" ? selected("usd").concat(selected("cny")) : lane.name === "Рублёвые облигации" ? selected("rub") : [{ secid: "LQDT", name: "LQDT" }, { secid: "TMON", name: "TMON" }];
-    const editor = lane.name === "Рубли" ? "" : editorItems.map((item) => '<label class="check">' + esc(item.name) + ' <input data-limit="' + esc(item.secid) + '" type="number" min="0" step="1000" value="' + (limits[item.secid] ?? "") + '" placeholder="авто"> ₽</label>').join("");
+    const editor = lane.name === "Рубли" ? "" : editorItems.map((item) => '<label class="check">' + (lane.name === "Пары" ? "Пара-вал.облигация · " : "") + esc(item.name) + ' <input data-limit="' + esc(item.secid) + '" type="number" min="0" step="1000" value="' + (limits[item.secid] ?? "") + '" placeholder="авто"> ₽</label>').join("");
     return '<div class="lane"><div class="top"><h3>' + lane.name + '</h3><span class="badge ' + cls + '">' + badge + '</span></div><div class="bar"><span style="width:' + width + '%"></span></div><div class="muted">' + width + '% плана · ' + moneyText(have) + ' из ' + moneyText(target) + '. ' + lane.hint + '</div><div>' + text + '</div>' + (action ? '<div class="muted">Что сделать: ' + action + '</div>' : '') + (names.length ? '<div class="muted">Уже в корзине: ' + names.join(", ") + '</div>' : '') + pairSplit + editor + '</div>';
   });
   const cash = account ? account.cash : 0;
