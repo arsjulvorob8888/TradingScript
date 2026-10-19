@@ -436,32 +436,23 @@ function pairShape(title) {
   const future = title === "Доллар" ? "USDRUBF" : "CNYRUBF";
   const bonds = (title === "Доллар" ? selected("usd") : selected("cny")).map((bond) => bond.secid);
   const positions = accountState?.account?.positions || [];
+  const bondValue = positions.filter((item) => bonds.includes(item.ticker)).reduce((sum, item) => sum + item.value, 0);
   const hedge = positions.find((item) => item.ticker === future);
-  const bond = positions.find((item) => bonds.includes(item.ticker));
-  const held = positionHeld(bonds.concat(future));
-  const quote = hedge && hedge.average > 0 ? hedge : bond;
-  const entry = Number(quote?.average) || 0;
-  const now = Number(quote?.price) || 0;
-  const move = entry > 0 ? (now / entry - 1) * 100 : 0;
-  const opened = hedge?.opened || bond?.opened || null;
-  const days = opened ? Math.max(0, (Date.now() - Date.parse(opened)) / 86400000) : 0;
-  const ripe = held && days >= 20 && entry > 0;
-  const strong = ripe && Math.abs(move) >= 5;
-  let bondShare = 50;
-  if (strong) {
-    const tilt = Math.min(25, Math.round(Math.abs(move)));
-    bondShare = move < 0 ? 50 + tilt : 50 - tilt;
-  }
-  const dateText = opened ? new Date(opened).toLocaleDateString("ru-RU") : "";
-  const moveText = !held ? "позиция не куплена" : `от цены покупки ${move > 0 ? "+" : ""}${move.toFixed(1)}%${dateText ? ", с " + dateText : ""}`;
-  const reason = !held
-    ? "ровно 50/50, перераспределение выключено"
-    : !ripe
-      ? `куплено ${dateText || "только что"}, ${Math.floor(days)} дн. До 20 дней остаёмся в безопасных 50/50`
-      : strong
-        ? (move < 0 ? "с покупки валюта подешевела больше чем на 5% — больше облигаций" : "с покупки валюта подорожала больше чем на 5% — больше шорт")
-        : "от цены покупки нет движения на 5%. Возвращаемся к 50/50";
-  return { title, bond: bondShare, short: 100 - bondShare, active: strong, moveText, reason };
+  const notional = hedge ? contractOf(hedge) : 0;
+  const sum = bondValue + notional;
+  const bondShare = sum > 1000 ? Math.round(bondValue / sum * 100) : 50;
+  const gap = bondValue - notional;
+  const base = Math.max(bondValue, notional, 1);
+  const even = sum > 1000 && Math.abs(gap) / base <= 0.1;
+  const rub = (value) => Math.round(value).toLocaleString("ru-RU") + " ₽";
+  return {
+    title,
+    bond: bondShare,
+    short: sum > 1000 ? 100 - bondShare : 50,
+    active: !even && sum > 1000,
+    moveText: sum > 1000 ? `облигации ${rub(bondValue)}, объём шорта ${rub(notional)}` : "позиция не куплена",
+    reason: sum < 1000 ? "пока нечего сравнивать" : even ? "объём шорта близок к облигациям" : (gap > 0 ? `шорт меньше облигаций на ${rub(gap)}` : `шорт больше облигаций на ${rub(-gap)}`),
+  };
 }
 function save() { localStorage.setItem("carry-picks", JSON.stringify(picks)); syncState(); }
 function saveExcluded() { localStorage.setItem("carry-excluded", JSON.stringify(excluded)); }
@@ -577,7 +568,7 @@ function draw() {
     pairShape("Доллар"),
     pairShape("Юань"),
   ];
-  document.querySelector("#pairMix").innerHTML = mixes.map((item, index) => `<div class="pair-card"><svg id="mix${index}"></svg><h3>${item.title}</h3><div class="${item.active ? "shift" : "muted"}">${item.active ? "Перераспределение" : "Ровно"}</div><div class="muted">${item.bond}% облигация · ${item.short}% шорт</div><div class="muted">${item.moveText}. ${item.reason}</div></div>`).join("");
+  document.querySelector("#pairMix").innerHTML = mixes.map((item, index) => `<div class="pair-card"><svg id="mix${index}"></svg><h3>${item.title}</h3><div class="${item.active ? "shift" : "muted"}">${item.active ? "Перекос" : "По деньгам ровно"}</div><div class="muted">${item.bond}% облигация · ${item.short}% шорт</div><div class="muted">${item.moveText}. ${item.reason}</div></div>`).join("");
   mixes.forEach((item, index) => ring("#mix" + index, [{ name: "Облигация", value: item.bond }, { name: "Шорт", value: item.short }]));
   const rub = selected("rub");
   const usd = selected("usd");

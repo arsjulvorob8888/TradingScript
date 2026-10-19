@@ -545,27 +545,31 @@ async function trade(token, auto, sleeves, accountId) {
     const gap = unmet.get(sleeve) || 0;
     const reserved = ordered.filter((item) => rankOf(item.name) < rank).reduce((sum, item) => sum + (unmet.get(item) || 0), 0);
     const available = Math.max(0, budget - reserved);
+    let skipBuy = false;
+    let spentSleeve = 0;
     if (rank > 0 && pairWaiting) {
       attempts.push({ sleeve: sleeve.name, title: sleeve.name, ticker: "", status: "ждёт пару", detail: `Свободно ${Math.round(budget).toLocaleString("ru-RU")} ₽, они оставлены под валютные пары.`, why: "Очередь: сначала шорт фьючерса и валютная облигация, затем рублёвые, затем фонды.", action: "Ничего докупать здесь не нужно, пока пара не собрана." });
-      continue;
+      skipBuy = true;
     }
     const manualOrders = sleeve.orders.filter((order) => order.limit !== undefined && order.limit !== null && order.limit !== "");
     const manualSum = manualOrders.reduce((sum, order) => sum + Math.max(0, Number(order.limit) || 0), 0);
     let deficit = Math.min(gap, available);
     if (manualOrders.length === sleeve.orders.length) deficit = Math.min(deficit, manualSum);
-    if (gap < 1000) {
+    if (!skipBuy && gap < 1000) {
       attempts.push({ sleeve: sleeve.name, title: sleeve.name, ticker: "", status: "набрано", detail: `Уже ${Math.round(have).toLocaleString("ru-RU")} ₽ из ${Math.round(target).toLocaleString("ru-RU")} ₽.`, why: "Доля плана заполнена, докупать нечего.", action: "Ничего делать не нужно." });
       unmet.set(sleeve, 0);
-      continue;
+      skipBuy = true;
     }
-    if (deficit < 1000) {
-      attempts.push({ sleeve: sleeve.name, title: sleeve.name, ticker: "", status: "ждёт очередь", detail: `Нужно ${Math.round(gap).toLocaleString("ru-RU")} ₽, доступно ${Math.round(available).toLocaleString("ru-RU")} ₽: остальное зарезервировано под более раннюю корзину.`, why: "Очередь: пары, потом рублёвые облигации, потом фонды.", action: "Пополните рубли или уменьшите сумму более приоритетной заявки." });
-      if (rank === 0) pairWaiting = true;
-      continue;
+    if (!skipBuy && deficit < 1000) {
+      const dust = rank === 0 && gap < 8000;
+      attempts.push({ sleeve: sleeve.name, title: sleeve.name, ticker: "", status: dust ? "набрано" : "ждёт очередь", detail: dust ? `До плана осталось ${Math.round(gap).toLocaleString("ru-RU")} ₽, это меньше одного лота. Рубли идут в следующую корзину.` : `Нужно ${Math.round(gap).toLocaleString("ru-RU")} ₽, доступно ${Math.round(available).toLocaleString("ru-RU")} ₽: остальное зарезервировано под более раннюю корзину.`, why: dust ? "Целый лот уже не помещается в план пары." : "Очередь: пары, потом рублёвые облигации, потом фонды.", action: dust ? "Ничего делать не нужно." : "Пополните рубли или уменьшите сумму более приоритетной заявки." });
+      if (rank === 0 && !dust) pairWaiting = true;
+      if (dust) unmet.set(sleeve, 0);
+      skipBuy = true;
     }
+    if (!skipBuy) {
     const parts = sleeve.orders.reduce((sum, order) => sum + (Number(order.part) || 1), 0) || sleeve.orders.length;
     let carry = 0;
-    let spentSleeve = 0;
     let pairFailed = false;
     for (const order of sleeve.orders) {
       if (order.limit === 0 || order.limit === "0") {
@@ -619,8 +623,9 @@ async function trade(token, auto, sleeves, accountId) {
         attempts.push({ sleeve: sleeve.name, title: order.title || sleeve.name, ticker: order.ticker, status: failure.status, detail: failure.detail, why: `Заявка в «${sleeve.name}» на около ${Math.round(share).toLocaleString("ru-RU")} ₽. Свободно было ${Math.round(budget).toLocaleString("ru-RU")} ₽.`, action: failure.action });
       }
     }
+    }
     unmet.set(sleeve, Math.max(0, gap - spentSleeve));
-    if (rank === 0 && (unmet.get(sleeve) || 0) > 1000) pairWaiting = true;
+    if (rank === 0 && (unmet.get(sleeve) || 0) >= 8000) pairWaiting = true;
     if (sleeve.hedge && have + spentSleeve > 1000) {
       try {
         const { match } = await instrumentFor(cleaned, link.host, sleeve.hedge.ticker, sleeve.hedge.query);
