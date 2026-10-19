@@ -700,26 +700,37 @@ function renderCategory() {
     const shift = changeOf(item);
     const role = roleOf(item);
     const notional = contractOf(item);
-    const title = role.startsWith("Пара") ? role : item.name;
+    const known = (board?.bonds || []).find((bond) => bond.secid === item.ticker);
+    const title = known ? role + " · " + known.name : (role.startsWith("Пара") ? role : item.name);
     const main = notional || item.value;
     const note = notional
       ? esc(role) + " · " + esc(item.ticker) + " · " + Math.abs(item.quantity) + " контр. · ГО " + money(item.value) + (item.average ? " · котировка " + item.average.toFixed(2) : "")
       : esc(role) + " · " + esc(item.ticker) + " · " + item.quantity.toFixed(2) + (item.average ? " · средняя " + item.average.toFixed(2) : "");
     return '<div class="prow"><div><strong>' + esc(title) + '</strong><div class="muted">' + note + '</div></div><div class="right"><strong>' + money(main) + '</strong>' + (notional ? '<div class="muted">объём контракта</div>' : '') + '<div class="' + (shift.pnl < 0 ? "down" : "up") + '">' + fineMoney(shift.pnl) + " · " + shift.pct.toFixed(2).replace(".", ",") + "%</div></div></div>";
   };
-  const pairBlock = (title, bonds, future) => {
+  const pairSide = (title, bonds, future, yieldValue, weight) => {
     const ids = bonds.map((bond) => bond.secid);
     const rows = positions.filter((item) => ids.includes(item.ticker) || item.ticker === future);
     const bondValue = rows.filter((item) => item.ticker !== future).reduce((sum, item) => sum + item.value, 0);
     const hedge = rows.find((item) => item.ticker === future);
     const notional = hedge ? contractOf(hedge) : 0;
+    const go = hedge ? hedge.value : 0;
     const gap = bondValue - notional;
     const base = Math.max(bondValue, notional, 1);
     const even = bondValue > 1000 && notional > 1000 && Math.abs(gap) / base <= 0.1;
     const state = bondValue < 1000 && notional < 1000 ? "пока пусто" : even ? "в равновесии" : gap > 0 ? "шорт меньше облигаций" : "шорт больше облигаций";
-    return '<h3>' + title + " · " + state + '</h3><div class="muted">Облигации ' + money(bondValue) + " · объём шорта " + money(notional) + " · ГО " + money(hedge ? hedge.value : 0) + "</div>" + (rows.length ? rows.map(lineOf).join("") : '<div class="muted">В этой паре пока ничего не куплено.</div>');
+    const html = '<h3>' + title + " · " + state + '</h3><div class="muted">План ' + weight + "%. Доходность " + yieldValue + ". Облигации " + money(bondValue) + " · объём шорта " + money(notional) + " · ГО " + money(go) + " · разница " + money(Math.abs(gap)) + "</div>" + (rows.length ? rows.map(lineOf).join("") : '<div class="muted">В этой паре пока ничего не куплено.</div>');
+    return { html, bondValue, notional, go };
   };
-  const heldHtml = openCategory === "Рубли" ? "" : openCategory === "Пары" ? pairBlock("Доллар", selected("usd"), "USDRUBF") + pairBlock("Юань", selected("cny"), "CNYRUBF") : held.length ? held.map(lineOf).join("") : '<div class="muted">Из этой категории на счёте пока ничего не куплено.</div>';
+  const dollarSide = pairSide("Доллар", selected("usd"), "USDRUBF", current?.usd == null ? "нет бумаги" : current.usd.toFixed(1) + "%", current ? Math.round(current.weights.usd * 100) : 0);
+  const yuanSide = pairSide("Юань", selected("cny"), "CNYRUBF", current?.cny == null ? "нет бумаги" : current.cny.toFixed(1) + "%", current ? Math.round(current.weights.cny * 100) : 0);
+  const totalBonds = dollarSide.bondValue + yuanSide.bondValue;
+  const totalShort = dollarSide.notional + yuanSide.notional;
+  const totalGap = totalBonds - totalShort;
+  const totalBase = Math.max(totalBonds, totalShort, 1);
+  const totalEven = totalBonds > 1000 && totalShort > 1000 && Math.abs(totalGap) / totalBase <= 0.1;
+  const totalHtml = '<div class="pair-balance ' + (totalEven ? "even" : "uneven") + '"><strong>Итого по парам · ' + (totalEven ? "в равновесии" : "не в равновесии") + '</strong><div>Облигации ' + money(totalBonds) + " · объём шорта " + money(totalShort) + " · ГО " + money(dollarSide.go + yuanSide.go) + "</div><div>Разница " + money(Math.abs(totalGap)) + ". Доллар и юань ниже считаются отдельно, здесь только сумма.</div></div>";
+  const heldHtml = openCategory === "Рубли" ? "" : openCategory === "Пары" ? totalHtml + dollarSide.html + yuanSide.html : held.length ? held.map(lineOf).join("") : '<div class="muted">Из этой категории на счёте пока ничего не куплено.</div>';
   let plan = "";
   if (openCategory === "Пары" && current) plan = "План: доллар " + Math.round(current.weights.usd * 100) + "%, юань " + Math.round(current.weights.cny * 100) + "%. Внутри пары облигация и шорт фьючерса. Сейчас доллар " + (current.usd == null ? "без бумаги" : current.usd.toFixed(1) + "%") + ", юань " + (current.cny == null ? "без бумаги" : current.cny.toFixed(1) + "%") + ".";
   if (openCategory === "Фонды" && board) plan = "План: LQDT " + Math.round((current?.weights.lqdt || 0) * 100) + "% при доходности " + board.lqdt.toFixed(1) + "%, TMON " + Math.round((current?.weights.tmon || 0) * 100) + "% при доходности " + board.tmon.toFixed(1) + "%.";
