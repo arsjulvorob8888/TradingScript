@@ -331,6 +331,13 @@ function sleeveOf(item) {
   if (String(item.group).includes("облигац") || item.group === "Облигации") return "Рублёвые облигации";
   return item.group || "Прочее";
 }
+function roleOf(item) {
+  const sleeve = sleeveOf(item);
+  if (sleeve !== "Пары") return sleeve;
+  const ticker = String(item.ticker || "");
+  if (ticker === "USDRUBF" || ticker === "CNYRUBF" || Number(item.quantity) < 0) return "Пара (шорт фьюча)";
+  return "Пара (вал. облигация)";
+}
 function positionHeld(tickers) {
   return (accountState?.account?.positions || []).some((item) => tickers.includes(item.ticker) && Math.abs(item.value) > 1000);
 }
@@ -620,11 +627,11 @@ function draw() {
     return (value < 0 ? "шорт " : "") + text + " шт";
   };
   const purchases = positions.filter((item) => item.group !== "Деньги" && !String(item.ticker || "").endsWith("UTSTOM"));
-  document.querySelector("#accountList").innerHTML = (purchases.map((item) => { const shift = changeOf(item); return `<div class="prow"><div><strong>${esc(item.name)}</strong><div class="muted">${esc(item.ticker)} · ${esc(sleeveOf(item))} · ${qtyText(item.quantity)}${item.average ? " · средняя " + item.average.toFixed(2) : ""}</div></div><div class="right"><strong>${moneyText(item.value)}</strong><div class="${shift.pnl < 0 ? "down" : "up"}">${fineMoney(shift.pnl)} · ${shift.pct.toFixed(2).replace(".", ",")}%</div></div></div>`; }).join("") + (account ? `<div class="prow"><div><strong>Рубли</strong><div class="muted">свободно, не покупка</div></div><div class="right"><strong>${moneyText(account.cash)}</strong></div></div>` : "")) || `<div class="muted">Покупок пока нет</div>`;
+  document.querySelector("#accountList").innerHTML = (purchases.map((item) => { const shift = changeOf(item); return `<div class="prow"><div><strong>${esc(item.name)}</strong><div class="muted">${esc(item.ticker)} · ${esc(roleOf(item))} · ${qtyText(item.quantity)}${item.average ? " · средняя " + item.average.toFixed(2) : ""}</div></div><div class="right"><strong>${moneyText(item.value)}</strong><div class="${shift.pnl < 0 ? "down" : "up"}">${fineMoney(shift.pnl)} · ${shift.pct.toFixed(2).replace(".", ",")}%</div></div></div>`; }).join("") + (account ? `<div class="prow"><div><strong>Рубли</strong><div class="muted">свободно, не покупка</div></div><div class="right"><strong>${moneyText(account.cash)}</strong></div></div>` : "")) || `<div class="muted">Покупок пока нет</div>`;
   document.querySelector("#accountList").hidden = !accountOpen;
   document.querySelector("#foldAccount").classList.toggle("shut", !accountOpen);
   renderCategory();
-  const rowOf = (item, share) => `<tr><td><strong>${esc(item.name)}</strong><div class="muted">${esc(item.ticker || "")}</div></td><td>${esc(sleeveOf(item))}</td><td>${item.quantity.toFixed(2)}</td><td>${item.price ? item.price.toFixed(2) : "—"}</td><td>${Math.round(item.value).toLocaleString("ru-RU")} ₽</td>${share}</tr>`;
+  const rowOf = (item, share) => `<tr><td><strong>${esc(item.name)}</strong><div class="muted">${esc(item.ticker || "")}</div></td><td>${esc(roleOf(item))}</td><td>${item.quantity.toFixed(2)}</td><td>${item.price ? item.price.toFixed(2) : "—"}</td><td>${Math.round(item.value).toLocaleString("ru-RU")} ₽</td>${share}</tr>`;
   document.querySelector("#strategyPositions").innerHTML = (positions.map((item) => rowOf(item, `<td>${total ? (item.value / total * 100).toFixed(1) : "0"}%</td>`)).join("") + (account ? `<tr><td><strong>Рубли</strong><div class="muted">свободно</div></td><td>Рубли</td><td>${Number(account.cash || 0).toLocaleString("ru-RU")}</td><td>1.00</td><td>${moneyText(account.cash)}</td><td>${account.total ? (account.cash / account.total * 100).toFixed(1) : "0"}%</td></tr>` : "")) || `<tr><td colspan="6" class="muted">Позиций нет.</td></tr>`;
   const orders = accountState?.orders || [];
   document.querySelector("#liveOrders").innerHTML = orders.length ? orders.map((item) => `<tr><td>${esc(item.ticker)}</td><td>${esc(item.direction)}</td><td>${item.lots}</td><td>${item.done}</td><td>${esc(String(item.status).replace("EXECUTION_REPORT_STATUS_", ""))}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">Открытых заявок нет</td></tr>`;
