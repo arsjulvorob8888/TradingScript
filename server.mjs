@@ -215,7 +215,7 @@ async function desk(token, accountId) {
     id: account.id,
     name: account.name || (link.sandbox ? "Песочница" : "Счёт"),
     type: account.type || "",
-    total: money(portfolio.totalAmountPortfolio) || cash + securities + futures || traded.reduce((sum, item) => sum + item.value, 0),
+    total: Math.max(money(portfolio.totalAmountPortfolio), cash + traded.reduce((sum, item) => sum + item.value, 0)),
     cash,
     securities,
     shares: money(portfolio.totalAmountShares),
@@ -368,9 +368,12 @@ async function trade(token, auto, sleeves, accountId) {
     await tbank(cleaned, link.host, "SandboxService", "SandboxPayIn", { accountId: account.id, amount: { currency: "rub", units: "1000000", nano: 0 } });
     attempts.push({ title: "Пополнение песочницы", ticker: "RUB", status: "исполнена", detail: "зачислено 1 000 000 ₽" });
   }
-  const total = money(portfolio.totalAmountPortfolio);
-  let budget = money(portfolio.totalAmountCurrencies) * 0.98;
   const owned = new Map((portfolio.positions || []).filter((item) => !String(item.ticker || "").endsWith("UTSTOM")).map((item) => [item.ticker, Math.abs(money(item.currentPrice) * money(item.quantity))]));
+  const qty = new Map((portfolio.positions || []).filter((item) => !String(item.ticker || "").endsWith("UTSTOM")).map((item) => [item.ticker, Math.abs(money(item.quantity))]));
+  const cashRaw = money(portfolio.totalAmountCurrencies);
+  const marked = (portfolio.positions || []).filter((item) => groupOf(item.ticker || "", item.instrumentType || "", item.name || "") !== "Деньги" && !String(item.ticker || "").endsWith("UTSTOM")).reduce((sum, item) => sum + Math.abs(money(item.currentPrice) * money(item.quantity)), 0) + cashRaw;
+  const total = Math.max(money(portfolio.totalAmountPortfolio), marked);
+  let budget = cashRaw * 0.98;
   const shortQty = new Map((portfolio.positions || []).filter((item) => money(item.quantity) < 0).map((item) => [item.ticker, Math.abs(money(item.quantity))]));
   const rankOf = (name) => /доллар|юань|пара/i.test(name) ? 0 : /руб/i.test(name) ? 1 : 2;
   const ordered = [...plan].sort((a, b) => rankOf(a.name) - rankOf(b.name) || Number(b.weight) - Number(a.weight));
@@ -381,6 +384,7 @@ async function trade(token, auto, sleeves, accountId) {
   }));
   let pairWaiting = false;
   const pairNeed = ordered.filter((sleeve) => rankOf(sleeve.name) === 0).reduce((sum, sleeve) => sum + (unmet.get(sleeve) || 0), 0);
+  attempts.push({ sleeve: "Пары", title: "Пара", ticker: "", status: pairNeed > 1000 ? "добираю" : "набрано", detail: `Счёт для плана ${Math.round(total).toLocaleString("ru-RU")} ₽, свободно ${Math.round(budget).toLocaleString("ru-RU")} ₽, паре не хватает ${Math.round(pairNeed).toLocaleString("ru-RU")} ₽.`, why: pairNeed > budget + 1000 ? "Свободных рублей меньше, чем дыра в паре. Сначала продаю лишние фонды, затем лишние рублёвые облигации." : pairNeed > 1000 ? "Рублей на пару хватает. Другие корзины не покупаю, пока пара не собрана." : "Пара уже в плане, докупать её не нужно.", action: "Пара всегда первая. Если она не полная — это ещё не конец шага, а очередь." });
   const resting = await openOrders(cleaned, link, account.id);
   const pairTickers = new Set(ordered.filter((sleeve) => rankOf(sleeve.name) === 0).flatMap((sleeve) => [...sleeve.orders.map((order) => order.ticker), sleeve.hedge?.ticker].filter(Boolean)));
   if (pairNeed > 1000) {
@@ -480,7 +484,8 @@ async function trade(token, auto, sleeves, accountId) {
         }
         const price = await rublePrice(cleaned, link.host, match);
         const lot = Number(match.lot || 1);
-        let lotCost = price * lot;
+        const knownUnit = (qty.get(order.ticker) || 0) > 0 ? (owned.get(order.ticker) || 0) / qty.get(order.ticker) : 0;
+        let lotCost = knownUnit > 500 ? knownUnit * lot : price * lot;
         const bond = String(match.instrumentType || "").toLowerCase().includes("bond");
         let lots = !lotCost || lotCost < 0.5 ? 0 : Math.min(50000, Math.floor(Math.min(share, budget) / lotCost));
         if (bond && (!lotCost || lotCost < 500)) {

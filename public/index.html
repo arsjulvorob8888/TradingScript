@@ -610,7 +610,8 @@ function draw() {
   }).join("");
   const account = accountState?.account;
   const moneyText = (value) => Math.round(Number(value) || 0).toLocaleString("ru-RU") + " ₽";
-  document.querySelector("#balanceTotal").textContent = account ? moneyText(account.total) : "—";
+  const portfolioTotal = account ? Math.max(account.total || 0, (account.positions || []).reduce((sum, item) => sum + item.value, 0) + (account.cash || 0)) : 0;
+  document.querySelector("#balanceTotal").textContent = account ? moneyText(portfolioTotal) : "—";
   const yieldNode = document.querySelector("#balanceYield");
   if (account) {
     const rows = account.positions || [];
@@ -718,7 +719,8 @@ function renderProgress(moneyText) {
   const blocks = lanes.map((lane) => {
     const target = total * lane.weight;
     const have = valueOf(lane.tickers);
-    const related = attempts.filter((item) => lane.tickers.includes(item.ticker) || item.sleeve === lane.name || item.title === lane.name);
+    const history = attempts.concat(accountState?.decision?.attempts || []);
+    const related = history.filter((item) => lane.tickers.includes(item.ticker) || item.sleeve === lane.name || item.title === lane.name);
     const last = related[related.length - 1];
     const full = target < 1000 || have + 1000 >= target;
     let badge = "ждёт";
@@ -746,6 +748,17 @@ function renderProgress(moneyText) {
       badge = "биржа закрыта"; text = "Нужно докупить " + moneyText(Math.max(0, target - have)) + ". " + session.text; action = "Оставьте стратегию запущенной. Шаг повторится, когда откроется основная сессия.";
     } else {
       badge = "к покупке"; text = "Сейчас можно купить примерно на " + moneyText(lane.name === "Пары" ? buy.pairs : lane.name === "Рублёвые облигации" ? buy.rub : buy.funds) + ". Это не больше свободных рублей и только после более приоритетных корзин."; action = "Очередь: пара, затем рублёвые облигации, затем фонды. Сумму бумаги можно задать в поле ниже.";
+    }
+    const gapLeft = Math.max(0, target - have);
+    if (lane.name === "Пары" && active && session.open && gapLeft > 1000 && autoOrders && !(reinvest && reinvestTo === "cash")) {
+      const free = account?.cash || 0;
+      const lastTry = related[related.length - 1];
+      badge = "добираю пару";
+      cls = "wait";
+      text = free + 1000 < gapLeft
+        ? "Пара первая, но свободных рублей " + moneyText(free) + ", а не хватает " + moneyText(gapLeft) + ". Скрипт продаёт лишние фонды и рублёвые облигации и этими деньгами докупает валютные облигации и шорт."
+        : "Пара первая. Свободных рублей хватает, докупаю ещё " + moneyText(gapLeft) + ". Фонды и рублёвые стоят в очереди и не покупаются, пока пара не собрана.";
+      action = lastTry ? "Последняя попытка: " + (lastTry.title || "шаг") + " — " + (lastTry.status || "") + ". " + (lastTry.detail || lastTry.why || "") : "Автошаг идёт сам. Если в журнале ошибка про страницу сайта, это обрыв ответа, а не отказ покупать пару.";
     }
     const width = target > 0 ? Math.max(0, Math.min(100, Math.round(have / target * 100))) : 0;
     const names = positions.filter((item) => lane.tickers.includes(item.ticker)).map((item) => roleOf(item) + " " + item.ticker + " " + moneyText(item.value));
@@ -821,13 +834,21 @@ function buildSleeves() {
   if (funds.length) sleeves.push({ name: "Фонды", weight: weights.lqdt + weights.tmon, orders: funds });
   return sleeves;
 }
+async function readJson(response) {
+  const text = await response.text();
+  try { return JSON.parse(text); }
+  catch {
+    if (text.trim().startsWith("<")) throw new Error("Шаг оборвался: сервер прислал страницу сайта вместо ответа. Так бывает, когда запрос слишком долгий. Обновите счёт через минуту — сервер мог досчитать его сам.");
+    throw new Error(text.slice(0, 160) || "Шаг не выполнен");
+  }
+}
 async function step() {
   if (stepping) return;
   if (!active) { record("Шаг не сделан: сначала запустите стратегию"); draw(); return; }
   stepping = true;
   document.querySelectorAll("[data-step]").forEach((button) => { button.textContent = "Выставляю…"; });
   try {
-    const response = await fetch("/api/step", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim(), auto: autoOrders, accountId: localStorage.getItem("carry-account") || "", sleeves: buildSleeves() }) }).then((item) => item.json());
+    const response = await fetch("/api/step", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim(), auto: autoOrders, accountId: localStorage.getItem("carry-account") || "", sleeves: buildSleeves() }) }).then(readJson);
     attempts = response.attempts || [];
     if (!attempts.length) attempts = [{ title: "Шаг", status: "пусто", detail: response.error || response.note || "брокер не вернул заявки" }];
     attempts.forEach((item) => record(`${item.title}: ${item.status}`));
@@ -850,7 +871,7 @@ async function refresh(force) {
   document.querySelector("#note").textContent = "";
   try {
     const [market, account] = await Promise.all([
-      fetch("/api/bonds", { method: "POST" }).then((response) => response.json()),
+      fetch("/api/bonds", { method: "POST" }).then(readJson),
       fetch("/api/desk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: tokenInput.value.trim(), accountId: localStorage.getItem("carry-account") || "", force: Boolean(force) }) }).then((response) => response.json()).catch(() => null),
     ]);
     board = market;
