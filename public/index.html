@@ -91,11 +91,24 @@
     .scroll { overflow-x: auto; }
     .token { flex: 1; }
     #status { margin: 0; font-size: 22px; }
-    .control { display: grid; grid-template-columns: 1.4fr .8fr; gap: 12px; }
-    .check { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
-    #reinvestTo { height: 36px; border-radius: 10px; background: var(--bg); }
+    .control { display: grid; grid-template-columns: 1.15fr .85fr; gap: 12px; align-items: stretch; }
+    .control .panel { display: flex; flex-direction: column; gap: 0; }
+    .switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0; padding: 12px 0; border-top: 1px solid var(--line); }
+    .switch input { appearance: none; width: 44px; min-width: 44px; height: 26px; margin: 0; padding: 0; border-radius: 99px; background: #d7dbe2; position: relative; cursor: pointer; }
+    .switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; }
+    .switch input:checked { background: var(--yellow); }
+    .switch input:checked::after { left: 21px; }
+    .field { display: grid; gap: 6px; padding: 4px 0 12px; }
+    .field select, #reinvestTo { width: 100%; height: 40px; border-radius: 12px; background: var(--bg); padding: 0 12px; }
+    #toggle { height: 36px; padding: 0 14px; background: var(--bg); }
+    #toggle.add { background: var(--yellow); }
+    #toggle.add:hover { background: var(--yellow-2); }
+    button.step { width: 100%; margin-top: 8px; }
+    #next { min-height: 2.6em; }
+    #log { overflow: auto; max-height: 240px; }
     .check input[data-limit] { width: 120px; height: 32px; background: var(--bg); }
-    #log div + div { margin-top: 6px; }
+    .check { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+    #log div + div { margin-top: 8px; }
     #log div:first-child { font-weight: 700; }
     @media (max-width: 800px) { .control { display: block; } .control .panel + .panel { margin-top: 8px; } }
   </style>
@@ -139,8 +152,8 @@
         </div>
         <button id="toggle" class="add" type="button">Запустить стратегию</button>
       </div>
-      <label class="check"><input id="reinvest" type="checkbox" checked> Реинвестировать купоны и фандинг</label>
-      <label class="check">Куда<select id="reinvestTo">
+      <label class="switch"><span>Реинвестировать купоны и фандинг</span><input id="reinvest" type="checkbox" checked></label>
+      <label class="field"><span class="muted">Куда направлять</span><select id="reinvestTo">
         <option value="best">В лучшую корзину</option>
         <option value="rub">В рублёвые облигации</option>
         <option value="usd">В пару доллар</option>
@@ -148,9 +161,9 @@
         <option value="funds">В денежный рынок</option>
         <option value="cash">Оставить в рублях</option>
       </select></label>
-      <label class="check"><input id="auto" type="checkbox"> Разрешить заявки без отдельного подтверждения</label>
+      <label class="switch"><span>Заявки без отдельного подтверждения</span><input id="auto" type="checkbox"></label>
       <div class="muted" id="next"></div>
-      <button type="button" data-step>Сделать шаг</button>
+      <button class="add step" type="button" data-step>Сделать шаг</button>
     </div>
     <div class="panel">
       <div class="muted">Журнал действий</div>
