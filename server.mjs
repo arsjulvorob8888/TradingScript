@@ -539,7 +539,7 @@ async function trade(token, auto, sleeves, accountId) {
               instrumentId: match.uid || match.figi,
             });
             const status = String(posted.executionReportStatus || "");
-            attempts.push({ sleeve: sleeve.name, title: sleeve.hedge.title, ticker: sleeve.hedge.ticker, status: status.includes("FILL") ? "исполнена" : "выставлена", detail: `Шорт ${add} лот. под облигации на ~${Math.round(have + spentSleeve).toLocaleString("ru-RU")} ₽.`, why: "Хедж ставится вместе с валютной облигацией и раньше рублёвых покупок.", action: "Ничего делать не нужно." });
+            attempts.push({ sleeve: sleeve.name, title: sleeve.hedge.title, ticker: sleeve.hedge.ticker, status: status.includes("FILL") ? "исполнена" : "выставлена", detail: `Шорт ${add} контр. Объём одного контракта ~${Math.round(notional).toLocaleString("ru-RU")} ₽, облигации ~${Math.round(have + spentSleeve).toLocaleString("ru-RU")} ₽. Это не гарантийное обеспечение, а размер хеджа.`, why: "Шорт сравнивается с суммой валютных облигаций. Пока суммы не близки, пара не в равновесии.", action: "Ничего делать не нужно." });
           }
         }
       } catch (error) {
