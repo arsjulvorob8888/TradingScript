@@ -335,8 +335,8 @@ function roleOf(item) {
   const sleeve = sleeveOf(item);
   if (sleeve !== "Пары") return sleeve;
   const ticker = String(item.ticker || "");
-  if (ticker === "USDRUBF" || ticker === "CNYRUBF" || Number(item.quantity) < 0) return "Пара (шорт фьюча)";
-  return "Пара (вал. облигация)";
+  if (ticker === "USDRUBF" || ticker === "CNYRUBF" || Number(item.quantity) < 0) return "Пара — шорт фьюча";
+  return "Пара — вал. облигация";
 }
 function positionHeld(tickers) {
   return (accountState?.account?.positions || []).some((item) => tickers.includes(item.ticker) && Math.abs(item.value) > 1000);
@@ -631,11 +631,11 @@ function draw() {
     return (value < 0 ? "шорт " : "") + text + " шт";
   };
   const purchases = positions.filter((item) => item.group !== "Деньги" && !String(item.ticker || "").endsWith("UTSTOM"));
-  document.querySelector("#accountList").innerHTML = (purchases.map((item) => { const shift = changeOf(item); return `<div class="prow"><div><strong>${esc(item.name)}</strong><div class="muted">${esc(item.ticker)} · ${esc(roleOf(item))} · ${qtyText(item.quantity)}${item.average ? " · средняя " + item.average.toFixed(2) : ""}</div></div><div class="right"><strong>${moneyText(item.value)}</strong><div class="${shift.pnl < 0 ? "down" : "up"}">${fineMoney(shift.pnl)} · ${shift.pct.toFixed(2).replace(".", ",")}%</div></div></div>`; }).join("") + (account ? `<div class="prow"><div><strong>Рубли</strong><div class="muted">свободно, не покупка</div></div><div class="right"><strong>${moneyText(account.cash)}</strong></div></div>` : "")) || `<div class="muted">Покупок пока нет</div>`;
+  document.querySelector("#accountList").innerHTML = (purchases.map((item) => { const shift = changeOf(item); const role = roleOf(item); const title = role.startsWith("Пара") ? role : item.name; return `<div class="prow"><div><strong>${esc(title)}</strong><div class="muted">${esc(item.ticker)} · ${esc(role)} · ${qtyText(item.quantity)}${item.average ? " · средняя " + item.average.toFixed(2) : ""}</div></div><div class="right"><strong>${moneyText(item.value)}</strong><div class="${shift.pnl < 0 ? "down" : "up"}">${fineMoney(shift.pnl)} · ${shift.pct.toFixed(2).replace(".", ",")}%</div></div></div>`; }).join("") + (account ? `<div class="prow"><div><strong>Рубли</strong><div class="muted">свободно, не покупка</div></div><div class="right"><strong>${moneyText(account.cash)}</strong></div></div>` : "")) || `<div class="muted">Покупок пока нет</div>`;
   document.querySelector("#accountList").hidden = !accountOpen;
   document.querySelector("#foldAccount").classList.toggle("shut", !accountOpen);
   renderCategory();
-  const rowOf = (item, share) => `<tr><td><strong>${esc(item.name)}</strong><div class="muted">${esc(item.ticker || "")}</div></td><td>${esc(roleOf(item))}</td><td>${item.quantity.toFixed(2)}</td><td>${item.price ? item.price.toFixed(2) : "—"}</td><td>${Math.round(item.value).toLocaleString("ru-RU")} ₽</td>${share}</tr>`;
+  const rowOf = (item, share) => { const role = roleOf(item); const title = role.startsWith("Пара") ? role : item.name; return `<tr><td><strong>${esc(title)}</strong><div class="muted">${esc(item.ticker || "")} · ${esc(role)}</div></td><td>${esc(role)}</td><td>${item.quantity.toFixed(2)}</td><td>${item.price ? item.price.toFixed(2) : "—"}</td><td>${Math.round(item.value).toLocaleString("ru-RU")} ₽</td>${share}</tr>`; };
   const rowShare = (item) => {
     const row = shareRows.find((entry) => !entry.cash && entry.ticker === item.ticker && entry.amount === item.value);
     return (row ? row.value : 0).toFixed(1).replace(".", ",") + "%";
@@ -658,7 +658,7 @@ function renderCategory() {
   const money = (value) => Math.round(Number(value) || 0).toLocaleString("ru-RU") + " ₽";
   const belongs = (item) => sleeveOf(item) === openCategory;
   const held = positions.filter(belongs);
-  const heldHtml = openCategory === "Рубли" ? "" : held.length ? held.map((item) => { const shift = changeOf(item); return '<div class="prow"><div><strong>' + esc(item.name) + '</strong><div class="muted">' + esc(item.ticker) + ' · ' + item.quantity.toFixed(2) + (item.average ? ' · средняя ' + item.average.toFixed(2) : '') + '</div></div><div class="right"><strong>' + money(item.value) + '</strong><div class="' + (shift.pnl < 0 ? 'down' : 'up') + '">' + fineMoney(shift.pnl) + ' · ' + shift.pct.toFixed(2).replace('.', ',') + '%</div></div></div>'; }).join("") : '<div class="muted">Из этой категории на счёте пока ничего не куплено.</div>';
+  const heldHtml = openCategory === "Рубли" ? "" : held.length ? held.map((item) => { const shift = changeOf(item); const role = roleOf(item); const title = role.startsWith("Пара") ? role : item.name; return '<div class="prow"><div><strong>' + esc(title) + '</strong><div class="muted">' + esc(role) + ' · ' + esc(item.ticker) + ' · ' + item.quantity.toFixed(2) + (item.average ? ' · средняя ' + item.average.toFixed(2) : '') + '</div></div><div class="right"><strong>' + money(item.value) + '</strong><div class="' + (shift.pnl < 0 ? 'down' : 'up') + '">' + fineMoney(shift.pnl) + ' · ' + shift.pct.toFixed(2).replace('.', ',') + '%</div></div></div>'; }).join("") : '<div class="muted">Из этой категории на счёте пока ничего не куплено.</div>';
   let plan = "";
   if (openCategory === "Пары" && current) plan = "План: доллар " + Math.round(current.weights.usd * 100) + "%, юань " + Math.round(current.weights.cny * 100) + "%. Внутри пары облигация и шорт фьючерса. Сейчас доллар " + (current.usd == null ? "без бумаги" : current.usd.toFixed(1) + "%") + ", юань " + (current.cny == null ? "без бумаги" : current.cny.toFixed(1) + "%") + ".";
   if (openCategory === "Фонды" && board) plan = "План: LQDT " + Math.round((current?.weights.lqdt || 0) * 100) + "% при доходности " + board.lqdt.toFixed(1) + "%, TMON " + Math.round((current?.weights.tmon || 0) * 100) + "% при доходности " + board.tmon.toFixed(1) + "%.";
@@ -735,7 +735,7 @@ function renderProgress(moneyText) {
       badge = "к покупке"; text = "Сейчас можно купить примерно на " + moneyText(lane.name === "Пары" ? buy.pairs : lane.name === "Рублёвые облигации" ? buy.rub : buy.funds) + ". Это не больше свободных рублей и только после более приоритетных корзин."; action = "Очередь: пара, затем рублёвые облигации, затем фонды. Сумму бумаги можно задать в поле ниже.";
     }
     const width = target > 0 ? Math.max(0, Math.min(100, Math.round(have / target * 100))) : 0;
-    const names = lane.tickers.filter((ticker) => positions.some((item) => item.ticker === ticker)).map((ticker) => ticker + " " + moneyText(valueOf([ticker])));
+    const names = positions.filter((item) => lane.tickers.includes(item.ticker)).map((item) => roleOf(item) + " " + item.ticker + " " + moneyText(item.value));
     const bondValue = valueOf(selected("usd").concat(selected("cny")).map((bond) => bond.secid));
     const hedgeValue = valueOf(["USDRUBF", "CNYRUBF"]);
     const pairSplit = lane.name === "Пары" ? '<div class="' + (bondValue < 1000 ? "down" : "muted") + '">Валютные облигации ' + moneyText(bondValue) + " · шорт фьючерса " + moneyText(hedgeValue) + (bondValue < 1000 ? ". Облигации пары ещё не куплены." : "") + "</div>" : "";
