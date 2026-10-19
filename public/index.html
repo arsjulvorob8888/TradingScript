@@ -42,7 +42,10 @@
     .up { color: #178a34; }
     .sleeves { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
     .split { display: grid; grid-template-columns: minmax(220px, 280px) 1fr; gap: 12px; }
-    .rings { display: flex; align-items: center; justify-content: space-around; gap: 8px; }
+    .rings { display: flex; align-items: center; justify-content: space-around; flex-wrap: wrap; gap: 8px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 6px 12px; width: 100%; justify-content: center; }
+    .legend span { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+    .legend i { width: 10px; height: 10px; border-radius: 2px; display: block; }
     .pair-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
     .pair-card { background: var(--bg); border-radius: 14px; padding: 8px; text-align: center; }
     .pair-card svg { width: 92px; height: 92px; }
@@ -162,6 +165,12 @@
     <div class="panel rings">
       <div class="donut"><div class="muted">План</div><svg id="ring"></svg></div>
       <div class="donut"><div class="muted">Факт</div><svg id="ringFact"></svg></div>
+      <div class="legend">
+        <span><i style="background:#ffdd2d"></i>Пары</span>
+        <span><i style="background:#3b78f0"></i>Фонды</span>
+        <span><i style="background:#2a2a2a"></i>Рублёвые облигации</span>
+        <span><i style="background:#c5c9d0"></i>Рубли</span>
+      </div>
     </div>
     <div class="pair-row" id="pairMix"></div>
   </section>
