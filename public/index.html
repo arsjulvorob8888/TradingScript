@@ -91,7 +91,7 @@
     .control { display: grid; grid-template-columns: 1.4fr .8fr; gap: 12px; }
     .check { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
     #reinvestTo { height: 36px; border-radius: 10px; background: var(--bg); }
-    .check input { width: auto; min-width: 0; height: auto; }
+    .check input[data-limit] { width: 120px; height: 32px; background: var(--bg); }
     #log div + div { margin-top: 6px; }
     #log div:first-child { font-weight: 700; }
     @media (max-width: 800px) { .control { display: block; } .control .panel + .panel { margin-top: 8px; } }
@@ -251,6 +251,7 @@ let attempts = [];
 let openCategory = "";
 let progressOpen = true;
 let accountOpen = false;
+let limits = JSON.parse(localStorage.getItem("carry-limits") || "{}");
 let stepping = false;
 let board = null;
 let picks = JSON.parse(localStorage.getItem("carry-picks") || '{"rub":[],"usd":[],"cny":[]}');
@@ -636,10 +637,21 @@ function renderProgress(moneyText) {
   const session = sessionNow();
   const valueOf = (tickers) => positions.filter((item) => tickers.includes(item.ticker)).reduce((sum, item) => sum + item.value, 0);
   const lanes = [
-    { name: "Пары", weight: current ? current.weights.usd + current.weights.cny : 0, tickers: selected("usd").map((bond) => bond.secid).concat(selected("cny").map((bond) => bond.secid), ["USDRUBF", "CNYRUBF"]), hint: "долларовая и юаневая облигация плюс шорт фьючерса" },
-    { name: "Фонды", weight: current ? current.weights.lqdt + current.weights.tmon : 0, tickers: ["LQDT", "TMON"], hint: "LQDT и TMON" },
-    { name: "Рублёвые облигации", weight: current ? current.weights.rub : 0, tickers: selected("rub").map((bond) => bond.secid), hint: "выбранные рублёвые выпуски" },
+    { name: "Пары", weight: current ? current.weights.usd + current.weights.cny : 0, tickers: selected("usd").map((bond) => bond.secid).concat(selected("cny").map((bond) => bond.secid), ["USDRUBF", "CNYRUBF"]), hint: "сначала: валютная облигация и шорт фьючерса" },
+    { name: "Рублёвые облигации", weight: current ? current.weights.rub : 0, tickers: selected("rub").map((bond) => bond.secid), hint: "после пар, на оставшиеся рубли" },
+    { name: "Фонды", weight: current ? current.weights.lqdt + current.weights.tmon : 0, tickers: ["LQDT", "TMON"], hint: "в последнюю очередь" },
   ];
+  const free = (account?.cash || 0) * 0.98;
+  const gapOf = (lane) => Math.max(0, total * lane.weight - valueOf(lane.tickers));
+  const pairGap = gapOf(lanes[0]);
+  const rubGap = gapOf(lanes[1]);
+  const fundGap = gapOf(lanes[2]);
+  let rest = free;
+  const buy = { pairs: Math.min(pairGap, rest), rub: 0, funds: 0 };
+  rest -= buy.pairs;
+  buy.rub = Math.min(rubGap, rest);
+  rest -= buy.rub;
+  buy.funds = Math.min(fundGap, rest);
   const blocks = lanes.map((lane) => {
     const target = total * lane.weight;
     const have = valueOf(lane.tickers);
@@ -670,11 +682,13 @@ function renderProgress(moneyText) {
     } else if (!session.open) {
       badge = "биржа закрыта"; text = "Нужно докупить " + moneyText(Math.max(0, target - have)) + ". " + session.text; action = "Оставьте стратегию запущенной. Шаг повторится, когда откроется основная сессия.";
     } else {
-      badge = "к покупке"; text = "Скрипт докупит около " + moneyText(Math.max(0, target - have)) + " по рынку."; action = "Нажмите «Сделать шаг». Заявка идёт, потому что факт меньше плана.";
+      badge = "к покупке"; text = "Сейчас можно купить примерно на " + moneyText(lane.name === "Пары" ? buy.pairs : lane.name === "Рублёвые облигации" ? buy.rub : buy.funds) + ". Это не больше свободных рублей и только после более приоритетных корзин."; action = "Очередь: пара, затем рублёвые облигации, затем фонды. Сумму бумаги можно задать в поле ниже.";
     }
     const width = target > 0 ? Math.max(0, Math.min(100, Math.round(have / target * 100))) : 0;
     const names = lane.tickers.filter((ticker) => positions.some((item) => item.ticker === ticker)).map((ticker) => ticker + " " + moneyText(valueOf([ticker])));
-    return '<div class="lane"><div class="top"><h3>' + lane.name + '</h3><span class="badge ' + cls + '">' + badge + '</span></div><div class="bar"><span style="width:' + width + '%"></span></div><div class="muted">' + width + '% плана · ' + moneyText(have) + ' из ' + moneyText(target) + '. ' + lane.hint + '</div><div>' + text + '</div>' + (action ? '<div class="muted">Что сделать: ' + action + '</div>' : '') + (names.length ? '<div class="muted">Уже в корзине: ' + names.join(", ") + '</div>' : '') + '</div>';
+    const editorItems = lane.name === "Пары" ? selected("usd").concat(selected("cny")) : lane.name === "Рублёвые облигации" ? selected("rub") : [{ secid: "LQDT", name: "LQDT" }, { secid: "TMON", name: "TMON" }];
+    const editor = lane.name === "Рубли" ? "" : editorItems.map((item) => '<label class="check">' + esc(item.name) + ' <input data-limit="' + esc(item.secid) + '" type="number" min="0" step="1000" value="' + (limits[item.secid] ?? "") + '" placeholder="авто"> ₽</label>').join("");
+    return '<div class="lane"><div class="top"><h3>' + lane.name + '</h3><span class="badge ' + cls + '">' + badge + '</span></div><div class="bar"><span style="width:' + width + '%"></span></div><div class="muted">' + width + '% плана · ' + moneyText(have) + ' из ' + moneyText(target) + '. ' + lane.hint + '</div><div>' + text + '</div>' + (action ? '<div class="muted">Что сделать: ' + action + '</div>' : '') + (names.length ? '<div class="muted">Уже в корзине: ' + names.join(", ") + '</div>' : '') + editor + '</div>';
   });
   const cash = account ? account.cash : 0;
   blocks.push('<div class="lane"><div class="top"><h3>Рубли</h3><span class="badge ok">свободно</span></div><div>' + moneyText(cash) + ' — это не заявка, а валюта на счёте. Из неё скрипт набирает остальные корзины.</div></div>');
@@ -687,6 +701,13 @@ function renderProgress(moneyText) {
   const box = document.querySelector("#attempts");
   if (box) box.innerHTML = attempts.length ? attempts.map((item) => '<div class="lane"><strong>' + esc(item.sleeve || item.title || "") + '</strong> · ' + esc(item.status || "") + '<div>' + esc(item.detail || "") + '</div><div class="muted">' + esc(item.action || "") + '</div></div>').join("") : '<div class="muted">Здесь появится разбор последнего шага: по какой корзине была заявка и почему биржа ответила именно так.</div>';
 }
+document.body.addEventListener("input", (event) => {
+  const field = event.target.closest("[data-limit]");
+  if (!field) return;
+  if (field.value === "") delete limits[field.dataset.limit];
+  else limits[field.dataset.limit] = Number(field.value);
+  localStorage.setItem("carry-limits", JSON.stringify(limits));
+});
 document.body.addEventListener("click", (event) => {
   const link = event.target.closest("[data-nav]");
   if (link) {
@@ -722,14 +743,15 @@ function buildSleeves() {
   if (reinvest && reinvestTo === "cash") return [];
   const current = model();
   const weights = current ? current.weights : { usd: 0, cny: 0, rub: 0, lqdt: 0, tmon: 0 };
-  const bondOrder = (bond) => ({ query: bond.secid, ticker: bond.secid, title: bond.name });
+  const bondOrder = (bond) => ({ query: bond.secid, ticker: bond.secid, title: bond.name, limit: limits[bond.secid] });
+  const fundOrder = (ticker, title, part) => ({ query: ticker, ticker, title, part, limit: limits[ticker] });
   const sleeves = [];
   if (weights.rub > 0 && selected("rub").length) sleeves.push({ name: "Рублёвые", weight: weights.rub, orders: selected("rub").slice(0, 2).map(bondOrder) });
   if (!excluded.usd && weights.usd > 0 && selected("usd").length) sleeves.push({ name: "Пара доллар", weight: weights.usd, orders: selected("usd").slice(0, 2).map(bondOrder), hedge: { query: "USDRUBF", ticker: "USDRUBF", title: "Шорт доллара" } });
   if (!excluded.cny && weights.cny > 0 && selected("cny").length) sleeves.push({ name: "Пара юань", weight: weights.cny, orders: selected("cny").slice(0, 2).map(bondOrder), hedge: { query: "CNYRUBF", ticker: "CNYRUBF", title: "Шорт юаня" } });
   const funds = [];
-  if (weights.tmon > 0) funds.push({ query: "TMON", ticker: "TMON", title: "TMON", part: weights.tmon });
-  if (weights.lqdt > 0) funds.push({ query: "LQDT", ticker: "LQDT", title: "LQDT", part: weights.lqdt });
+  if (weights.tmon > 0) funds.push(fundOrder("TMON", "TMON", weights.tmon));
+  if (weights.lqdt > 0) funds.push(fundOrder("LQDT", "LQDT", weights.lqdt));
   if (funds.length) sleeves.push({ name: "Фонды", weight: weights.lqdt + weights.tmon, orders: funds });
   return sleeves;
 }
