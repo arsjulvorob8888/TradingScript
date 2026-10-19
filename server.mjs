@@ -332,14 +332,14 @@ async function fxRub(token, host, ticker) {
 async function rublePrice(token, host, match) {
   const quote = await tbank(token, host, "MarketDataService", "GetLastPrices", { instrumentId: [match.figi || match.uid] });
   const points = money(quote.lastPrices?.[0]?.price);
-  if (!String(match.instrumentType || "").toLowerCase().includes("bond")) return points;
+  if (!String(match.instrumentType || "").toLowerCase().includes("bond")) return Math.abs(points);
   const bond = await tbank(token, host, "InstrumentsService", "BondBy", { idType: "INSTRUMENT_ID_TYPE_FIGI", id: match.figi });
   const nominal = money(bond.instrument?.nominal);
   const currency = String(bond.instrument?.nominal?.currency || bond.instrument?.currency || "rub").toLowerCase();
   let price = nominal ? (points / 100) * nominal : points;
   if (currency.includes("usd")) price *= (await fxRub(token, host, "USDRUBF")) || 90;
   else if (currency.includes("cny") || currency.includes("cnh")) price *= (await fxRub(token, host, "CNYRUBF")) || 12;
-  return price;
+  return Math.abs(price);
 }
 
 function explainFailure(text) {
@@ -484,16 +484,20 @@ async function trade(token, auto, sleeves, accountId) {
         }
         const price = await rublePrice(cleaned, link.host, match);
         const lot = Number(match.lot || 1);
-        const knownUnit = (qty.get(order.ticker) || 0) > 0 ? (owned.get(order.ticker) || 0) / qty.get(order.ticker) : 0;
-        let lotCost = knownUnit > 500 ? knownUnit * lot : price * lot;
+        const knownUnit = Math.abs((qty.get(order.ticker) || 0) > 0 ? (owned.get(order.ticker) || 0) / qty.get(order.ticker) : 0);
+        let lotCost = knownUnit > 500 ? knownUnit * lot : Math.abs(price) * lot;
         const bond = String(match.instrumentType || "").toLowerCase().includes("bond");
-        let lots = !lotCost || lotCost < 0.5 ? 0 : Math.min(50000, Math.floor(Math.min(share, budget) / lotCost));
+        const room = Math.min(budget, Math.max(0, deficit - spentSleeve));
+        let lots = !lotCost || lotCost < 0.5 ? 0 : Math.min(50000, Math.floor(Math.min(Math.max(share, 0), budget) / lotCost));
+        if (lots < 1 && lotCost >= 500 && room >= lotCost) lots = 1;
         if (bond && (!lotCost || lotCost < 500)) {
-          lots = Math.min(share, budget) >= 1000 ? 1 : 0;
-          lotCost = 0;
+          lots = room >= 1000 ? 1 : 0;
+          lotCost = Math.max(lotCost, 0);
         }
+        if (lotCost >= 1) lots = Math.min(lots, Math.floor(room / lotCost));
         if (lots < 1) {
-          attempts.push({ sleeve: sleeve.name, title: order.title, ticker: order.ticker, status: "пропущена", detail: `На лот нужно ${Math.round(price * lot || 0).toLocaleString("ru-RU")} ₽, а на эту бумагу сейчас отведено ${Math.round(Math.min(share, budget)).toLocaleString("ru-RU")} ₽.`, action: "Увеличьте сумму в поле заявки или дождитесь, пока освободятся рубли." });
+          carry += Math.max(share, 0);
+          attempts.push({ sleeve: sleeve.name, title: order.title, ticker: order.ticker, status: "пропущена", detail: `Лот стоит ${Math.round(lotCost || price * lot || 0).toLocaleString("ru-RU")} ₽. На бумагу пришлось ${Math.round(share).toLocaleString("ru-RU")} ₽, а на всю корзину осталось ${Math.round(Math.max(budget, 0)).toLocaleString("ru-RU")} ₽ — целый лот не покупаю, чтобы не превысить план.`, action: "Это не отказ биржи. Если нужен именно этот выпуск, впишите сумму не меньше лота." });
           continue;
         }
         const posted = await tbank(cleaned, link.host, link.sandbox ? "SandboxService" : "OrdersService", link.sandbox ? "PostSandboxOrder" : "PostOrder", {
@@ -508,7 +512,7 @@ async function trade(token, auto, sleeves, accountId) {
         budget -= spent;
         spentSleeve += spent;
         const status = String(posted.executionReportStatus || "");
-        attempts.push({ sleeve: sleeve.name, title: order.title, ticker: order.ticker, status: status.includes("FILL") ? "исполнена" : "выставлена", detail: `Покупка ${lots} лот. на ~${Math.round(spent).toLocaleString("ru-RU")} ₽. Приоритет: ${rank === 0 ? "пара" : rank === 1 ? "рублёвые" : "фонды"}.`, why: `До плана корзины не хватало ${Math.round(gap).toLocaleString("ru-RU")} ₽.`, action: "Ничего делать не нужно." });
+        attempts.push({ sleeve: sleeve.name, title: order.title, ticker: order.ticker, status: status.includes("FILL") ? "исполнена" : "выставлена", detail: `Покупка ${lots} лот. на ~${Math.round(Math.abs(spent)).toLocaleString("ru-RU")} ₽. Приоритет: ${rank === 0 ? "пара" : rank === 1 ? "рублёвые" : "фонды"}.`, why: `До плана корзины не хватало ${Math.round(gap).toLocaleString("ru-RU")} ₽.`, action: "Ничего делать не нужно." });
       } catch (error) {
         const failure = explainFailure(error instanceof Error ? error.message : "ошибка заявки");
         if (failure.status === "не хватает денег" && rank === 0) pairFailed = true;

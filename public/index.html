@@ -357,6 +357,12 @@ function roleOf(item) {
   if (ticker === "USDRUBF" || ticker === "CNYRUBF" || Number(item.quantity) < 0) return "Пара-шорт фьюча";
   return "Пара-вал.облигация";
 }
+function contractOf(item) {
+  if (item.ticker !== "USDRUBF" && item.ticker !== "CNYRUBF") return 0;
+  const quote = Number(item.price) || 0;
+  const lots = Math.abs(Number(item.quantity) || 0);
+  return (quote > 1000 ? quote : quote * 1000) * lots;
+}
 function positionHeld(tickers) {
   return (accountState?.account?.positions || []).some((item) => tickers.includes(item.ticker) && Math.abs(item.value) > 1000);
 }
@@ -655,13 +661,13 @@ function draw() {
   document.querySelector("#accountList").hidden = !accountOpen;
   document.querySelector("#foldAccount").classList.toggle("shut", !accountOpen);
   renderCategory();
-  const rowOf = (item, share) => { const role = roleOf(item); const title = role.startsWith("Пара") ? role : item.name; return `<tr><td><strong>${esc(title)}</strong><div class="muted">${esc(item.ticker || "")} · ${esc(role)}</div></td><td>${esc(role)}</td><td>${item.quantity.toFixed(2)}</td><td>${item.price ? item.price.toFixed(2) : "—"}</td><td>${Math.round(item.value).toLocaleString("ru-RU")} ₽</td>${share}</tr>`; };
+  const rowOf = (item, share) => { const role = roleOf(item); const title = role.startsWith("Пара") ? role : item.name; const notional = contractOf(item); return `<tr><td><strong>${esc(title)}</strong><div class="muted">${esc(item.ticker || "")} · ${esc(role)}</div></td><td>${esc(role)}</td><td>${item.quantity.toFixed(2)}</td><td>${item.price ? item.price.toFixed(2) : "—"}</td><td>${Math.round(item.value).toLocaleString("ru-RU")} ₽${notional ? `<div class="muted">объём ${Math.round(notional).toLocaleString("ru-RU")} ₽</div>` : ""}</td>${share}</tr>`; };
   const rowShare = (item) => {
     const row = shareRows.find((entry) => !entry.cash && entry.ticker === item.ticker && entry.amount === item.value);
     return (row ? row.value : 0).toFixed(1).replace(".", ",") + "%";
   };
   const cashShare = (shareRows.find((entry) => entry.cash)?.value || 0).toFixed(1).replace(".", ",") + "%";
-  document.querySelector("#strategyPositions").innerHTML = (positions.map((item) => rowOf(item, `<td>${rowShare(item)}</td>`)).join("") + (account ? `<tr><td><strong>Рубли</strong><div class="muted">свободно</div></td><td>Рубли</td><td>${Number(account.cash || 0).toLocaleString("ru-RU")}</td><td>1.00</td><td>${moneyText(account.cash)}</td><td>${cashShare}</td></tr>` : "")) || `<tr><td colspan="6" class="muted">Позиций нет.</td></tr>`;
+  document.querySelector("#strategyPositions").innerHTML = (positions.map((item) => rowOf(item, `<td>${rowShare(item)}</td>`)).join("") + (account ? `<tr><td><strong>Рубли</strong><div class="muted">свободно</div></td><td>Рубли</td><td>—</td><td>—</td><td>${moneyText(account.cash)}</td><td>${cashShare}</td></tr>` : "")) || `<tr><td colspan="6" class="muted">Позиций нет.</td></tr>`;
   const orders = accountState?.orders || [];
   document.querySelector("#liveOrders").innerHTML = orders.length ? orders.map((item) => `<tr><td>${esc(item.ticker)}</td><td>${esc(item.direction)}</td><td>${item.lots}</td><td>${item.done}</td><td>${esc(String(item.status).replace("EXECUTION_REPORT_STATUS_", ""))}</td></tr>`).join("") : `<tr><td colspan="5" class="muted">Открытых заявок нет</td></tr>`;
   const ops = accountState?.operations || [];
